@@ -511,6 +511,7 @@ fn write_and_sync(path: &Path, bytes: &[u8]) -> Result<(), String> {
 fn sync_file(path: &Path) -> Result<(), String> {
     OpenOptions::new()
         .read(true)
+        .write(true)
         .open(path)
         .and_then(|file| file.sync_all())
         .map_err(|error| format!("تعذر تثبيت ملف النسخة: {error}"))

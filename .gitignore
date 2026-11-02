@@ -23,8 +23,10 @@ src-tauri/target/
 src-tauri/resources/runtime/*
 !src-tauri/resources/runtime/README.md
 !src-tauri/resources/runtime/mysql/
+src-tauri/resources/runtime/mysql/**
 !src-tauri/resources/runtime/mysql/.gitkeep
 !src-tauri/resources/runtime/vcredist/
+src-tauri/resources/runtime/vcredist/**
 !src-tauri/resources/runtime/vcredist/.gitkeep
 release-artifacts/
 
