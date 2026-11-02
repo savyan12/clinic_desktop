@@ -1,0 +1,21 @@
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+
+  body {
+    background: var(--color-canvas) !important;
+  }
+
+  .no-print,
+  .v-snackbar,
+  .v-overlay-container {
+    display: none !important;
+  }
+
+  .print-sheet {
+    border: 0 !important;
+    padding: 0 !important;
+  }
+}

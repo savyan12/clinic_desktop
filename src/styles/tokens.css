@@ -1,0 +1,37 @@
+:root {
+  --color-primary: #0066cc;
+  --color-primary-focus: #0071e3;
+  --color-ink: #1d1d1f;
+  --color-ink-muted: #4f4f54;
+  --color-canvas: #ffffff;
+  --color-parchment: #f5f5f7;
+  --color-pearl: #fafafc;
+  --color-hairline: #e0e0e0;
+  --color-info-bg: #e8f1fc;
+  --color-success: #1a7f37;
+  --color-success-bg: #e6f4ea;
+  --color-danger: #c5221f;
+  --color-danger-bg: #fce8e6;
+  --color-danger-border: #f4b8b6;
+  --color-warning: #9a5b00;
+  --color-warning-bg: #fef3d7;
+  --color-warning-border: #edcf89;
+  --color-print-brand: #00784f;
+  --color-print-brand-dark: #00694b;
+  --color-print-tint: #eaf4ef;
+  --color-print-border: #c9d4e2;
+  --color-print-muted: #566277;
+  --radius-card: 18px;
+  --radius-field: 12px;
+  --radius-utility: 8px;
+  --radius-pill: 9999px;
+  --sidebar-width: 280px;
+  --font-body-size: 16px;
+  --font-body-weight: 400;
+  --font-table-size: 15px;
+  --font-table-weight: 400;
+  --font-heading-size: 32px;
+  --font-heading-weight: 600;
+  --font-section-size: 22px;
+  --font-section-weight: 600;
+}

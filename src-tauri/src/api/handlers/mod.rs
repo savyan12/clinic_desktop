@@ -1,0 +1,13 @@
+pub mod audit_log;
+pub mod auth;
+pub mod dashboard;
+pub mod doctors;
+pub mod financial;
+pub mod patients;
+pub mod reports;
+pub mod services;
+pub mod sessions;
+pub mod settings;
+pub mod sponsors;
+pub mod subscriptions;
+pub mod users;

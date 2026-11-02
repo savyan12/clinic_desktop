@@ -1,0 +1,20 @@
+{
+  "mysql": {
+    "version": "8.4.13",
+    "filename": "mysql-8.4.13-winx64.zip",
+    "urls": [
+      "https://cdn.mysql.com/Downloads/MySQL-8.4/mysql-8.4.13-winx64.zip",
+      "https://cdn.mysql.com/archives/mysql-8.4/mysql-8.4.13-winx64.zip"
+    ],
+    "sha256": "e9cd98b1d23f122987b1afca26ad942efec5891481103d48ae3cde237fa3ea54",
+    "verifiedSigningKey": "BCA43417C3B485DD128EC6D4B7B3B788A8D3785C"
+  },
+  "vcredist": {
+    "version": "14.44.35211.0",
+    "filename": "VC_redist.x64.exe",
+    "urls": [
+      "https://download.visualstudio.microsoft.com/download/pr/990c720a-46ce-4dc7-87b9-c2eb615d34b9/CC0FF0EB1DC3F5188AE6300FAEF32BF5BEEBA4BDD6E8E445A9184072096B713B/VC_redist.x64.exe"
+    ],
+    "sha256": "cc0ff0eb1dc3f5188ae6300faef32bf5beeba4bdd6e8e445a9184072096b713b"
+  }
+}

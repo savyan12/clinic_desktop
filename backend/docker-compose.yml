@@ -1,0 +1,20 @@
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-clinic_system}
+      MYSQL_USER: ${MYSQL_USER:-clinic}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-clinic_secret}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-clinic_root_secret}
+    ports:
+      - "3306:3306"
+    volumes:
+      - clinic_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-pclinic_root_secret"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  clinic_mysql_data:

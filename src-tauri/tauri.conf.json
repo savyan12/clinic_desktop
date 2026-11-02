@@ -1,0 +1,63 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "منظومة عيادة عين الحياة",
+  "version": "1.0.0",
+  "identifier": "com.ettizan.clinic",
+  "build": {
+    "beforeDevCommand": "npm run desktop:prepare && npm run dev",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "npm run desktop:prepare && npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "منظومة عيادة عين الحياة",
+        "width": 1500,
+        "height": 960,
+        "minWidth": 1024,
+        "minHeight": 720,
+        "center": true,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:* ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost data:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "category": "Medical",
+    "shortDescription": "منظومة محلية لإدارة مركز العلاج الطبيعي",
+    "longDescription": "تطبيق سطح مكتب عربي يعمل دون اتصال لإدارة المرضى والجلسات والاشتراكات والحسابات المالية والنسخ الاحتياطي.",
+    "publisher": "Ain Alhayat Clinic",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "resources/runtime/mysql": "runtime/mysql",
+      "resources/runtime/vcredist": "runtime/vcredist"
+    },
+    "windows": {
+      "allowDowngrades": false,
+      "webviewInstallMode": {
+        "type": "offlineInstaller",
+        "silent": true
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["Arabic", "English"],
+        "displayLanguageSelector": true,
+        "compression": "lzma",
+        "startMenuFolder": "عيادة عين الحياة",
+        "installerHooks": "windows/installer-hooks.nsh"
+      }
+    }
+  }
+}

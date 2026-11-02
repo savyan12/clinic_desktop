@@ -1,0 +1,48 @@
+[package]
+name = "clinic-desktop"
+version = "1.0.0"
+description = "Offline physiotherapy clinic management desktop application"
+authors = ["Ettizan Clinic"]
+edition = "2021"
+default-run = "clinic-desktop"
+
+[lib]
+name = "clinic_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7.4", features = [] }
+
+[dependencies]
+axum = { version = "0.8", features = ["http1", "json", "query", "tokio"] }
+base64 = "0.23.1"
+bcrypt = "0.17"
+chrono = { version = "0.4.45", features = ["clock", "serde"] }
+chrono-tz = "0.10"
+hex = "0.4"
+http = "1"
+printpdf = "0.8"
+rand = "0.9"
+rust_decimal = { version = "1", features = ["serde-with-str"] }
+rustybuzz = "0.20"
+rust_xlsxwriter = "0.92"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = "0.10.9"
+sqlx = { version = "0.8", features = ["chrono", "json", "mysql", "runtime-tokio-rustls", "rust_decimal", "uuid"] }
+tauri = { version = "2.12.5", features = [] }
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+ttf-parser = "0.25"
+unicode-bidi = "0.3"
+uuid = { version = "1.29.0", features = ["v4"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }

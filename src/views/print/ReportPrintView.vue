@@ -1,0 +1,13 @@
+<template>
+  <div class="print-sheet"><v-skeleton-loader v-if="loading" type="article, table" /><InlineError v-else-if="error" :message="error" /><template v-else-if="report"><div class="document-title"><div><h2>{{ reportTitle }}</h2><span>الفترة: {{ route.query.from || 'كل الفترات' }} — {{ route.query.to || 'حتى اليوم' }}</span></div><span>أُعد في {{ generatedAt }}</span></div><div class="summary-row"><div v-for="(value, key) in report.totals" :key="key"><span>{{ key }}</span><strong>{{ value }}</strong></div></div><v-table><thead><tr><th>المرجع</th><th>البيانات</th></tr></thead><tbody><tr v-for="row in report.rows" :key="row.id"><td>#{{ row.id }}</td><td><pre>{{ summarize(row) }}</pre></td></tr></tbody></v-table><p class="report-note">هذا التقرير لا يمثل تقرير أرباح؛ تعرض المفاهيم المالية كلٌ على حدة.</p></template></div>
+</template>
+
+<script setup>
+import { computed, onMounted, ref } from 'vue'; import { useRoute } from 'vue-router'; import { getReport } from '@/api/reports'; import InlineError from '@/components/common/InlineError.vue'
+const route = useRoute(); const report = ref(null); const loading = ref(true); const error = ref(''); const titles = { sessions: 'تقرير الجلسات', collections: 'تقرير المقبوضات', debts: 'تقرير الديون', 'doctor-dues': 'تقرير مستحقات الأطباء', subscriptions: 'تقرير الاشتراكات' }; const reportTitle = computed(() => titles[route.params.type] || 'تقرير'); const generatedAt = computed(() => new Intl.DateTimeFormat('ar-LY-u-nu-latn', { dateStyle: 'long', timeStyle: 'short' }).format(new Date())); onMounted(async () => { try { report.value = (await getReport(route.params.type, route.query)).data } catch (apiError) { error.value = apiError.message } finally { loading.value = false } }); const summarize = (row) => JSON.stringify(row, (key, value) => ['services', 'patient', 'doctor', 'sponsor'].includes(key) ? value : value, 2)
+</script>
+
+<style scoped>
+.print-sheet { display: grid; gap: 20px; padding: 24px 0; }.document-title { display: flex; justify-content: space-between; gap: 20px; }.document-title h2 { margin: 0; }.document-title span { color: var(--color-ink-muted); font-size: 13px; }.summary-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }.summary-row div { padding: 12px; border-radius: 10px; background: var(--color-pearl); }.summary-row span, .summary-row strong { display: block; }.summary-row span { color: var(--color-ink-muted); font-size: 12px; }.summary-row strong { font-size: 18px; }.print-sheet pre { margin: 0; white-space: pre-wrap; font-family: inherit; font-size: 12px; }.report-note { color: var(--color-ink-muted); font-size: 12px; }
+</style>
+

@@ -1,0 +1,234 @@
+name: Windows NSIS build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-build-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+env:
+  NODE_VERSION: '24.16.0'
+  RUST_VERSION: '1.99.1'
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+  VITE_USE_MOCK: 'false'
+  CLINIC_RELEASE_BUILD: 'true'
+
+jobs:
+  build:
+    name: Build Windows x64 NSIS installer
+    runs-on: windows-2022
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js and npm cache
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Check application version and preinstalled C++ tools
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not [Environment]::Is64BitProcess) { throw 'An x64 Windows build process is required.' }
+          $config = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          $cargo = Get-Content src-tauri/Cargo.toml -Raw
+          $cargoVersion = [regex]::Match($cargo, '(?m)^version = "([^"]+)"').Groups[1].Value
+          if ($config.version -ne $cargoVersion) { throw 'Tauri and Cargo application versions must match.' }
+          if ($env:GITHUB_REF.StartsWith('refs/tags/') -and $env:GITHUB_REF -ne "refs/tags/v$($config.version)") {
+            throw "Release tag must be v$($config.version); update both application versions before tagging."
+          }
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+          if (-not (Test-Path -LiteralPath $vswhere)) { throw 'The windows-2022 image must include Visual Studio Build Tools.' }
+          $vs = & $vswhere -latest -products '*' -version '[17.0,18.0)' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if ($LASTEXITCODE -ne 0 -or -not $vs) { throw 'Visual Studio 2022 x64 C++ tools are missing from the runner.' }
+          if (-not (Get-ChildItem "$vs/VC/Tools/MSVC/*/bin/Hostx64/x64/cl.exe" -ErrorAction SilentlyContinue)) {
+            throw 'The Visual Studio x64 C++ compiler is missing from the runner.'
+          }
+          $sdk = Get-ChildItem "${env:ProgramFiles(x86)}/Windows Kits/10/bin/*/x64/rc.exe" -ErrorAction SilentlyContinue
+          if (-not $sdk) { throw 'A Windows 10/11 SDK with the x64 resource compiler is required.' }
+          Write-Host "Using Visual Studio 2022 at $vs and Windows SDK $($sdk[-1].Directory.Parent.Name)"
+
+      - name: Install pinned stable Rust with the MSVC target
+        run: |
+          rustup toolchain install "${env:RUST_VERSION}-x86_64-pc-windows-msvc" --profile minimal --component rustfmt --target x86_64-pc-windows-msvc --no-self-update
+          if ($LASTEXITCODE -ne 0) { throw 'Rust installation failed.' }
+          rustup default "${env:RUST_VERSION}-x86_64-pc-windows-msvc"
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot select the pinned Rust toolchain.' }
+          rustc -vV
+          if ($LASTEXITCODE -ne 0) { throw 'Rust toolchain validation failed.' }
+
+      - name: Cache Cargo sources and compiled dependencies
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            src-tauri/target/debug/.fingerprint
+            src-tauri/target/debug/build
+            src-tauri/target/debug/deps
+            src-tauri/target/release/.fingerprint
+            src-tauri/target/release/build
+            src-tauri/target/release/deps
+          key: windows-2022-x64-cargo-${{ env.RUST_VERSION }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: |
+            windows-2022-x64-cargo-${{ env.RUST_VERSION }}-
+
+      - name: Install the desktop Vue frontend from its lockfile
+        run: npm ci
+
+      - name: Verify the frontend and runtime staging rules
+        run: |
+          npm run lint
+          if ($LASTEXITCODE -ne 0) { throw 'Frontend lint failed.' }
+          npm run verify:ui
+          if ($LASTEXITCODE -ne 0) { throw 'UI state verification failed.' }
+          node --test scripts/prepare-runtime.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Runtime staging tests failed.' }
+          npm run build
+          if ($LASTEXITCODE -ne 0) { throw 'Frontend production build failed.' }
+
+      - name: Download and authenticate official runtime packages
+        run: ./scripts/download-windows-runtime.ps1 -Destination "$env:RUNNER_TEMP/clinic-downloads"
+
+      - name: Prepare the bundled MySQL runtime and VC++ prerequisite
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $downloads = Get-Content "$env:RUNNER_TEMP/clinic-downloads/downloads.json" -Raw | ConvertFrom-Json
+          $vcKey = 'HKLM:/SOFTWARE/Microsoft/VisualStudio/14.0/VC/Runtimes/x64'
+          $vc = Get-ItemProperty -Path $vcKey -ErrorAction SilentlyContinue
+          if (-not $vc -or $vc.Installed -ne 1 -or [version]($vc.Version -replace '^v', '') -lt [version]$downloads.vcredist.version) {
+            $install = Start-Process -FilePath $downloads.vcredist.path -ArgumentList '/install', '/quiet', '/norestart' -Wait -PassThru
+            if ($install.ExitCode -eq 3010) { throw 'The runner needs a VC++ prerequisite reboot. Use a refreshed windows-2022 image and rerun.' }
+            if ($install.ExitCode -notin @(0, 1638)) { throw "VC++ prerequisite installation failed: $($install.ExitCode)" }
+            $vc = Get-ItemProperty -Path $vcKey
+            if ($vc.Installed -ne 1 -or [version]($vc.Version -replace '^v', '') -lt [version]$downloads.vcredist.version) {
+              throw 'A compatible x64 VC++ runtime was not installed.'
+            }
+          }
+          ./scripts/prepare-windows-runtime.ps1 -MySqlArchive $downloads.mysql.path -VcRedistInstaller $downloads.vcredist.path
+
+      - name: Stage and validate the release runtime
+        run: |
+          npm run desktop:prepare
+          if ($LASTEXITCODE -ne 0) { throw 'Rust runtime staging failed.' }
+          node scripts/validate-windows-runtime.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Staged runtime validation failed.' }
+
+      - name: Check and test Rust with the locked dependencies
+        working-directory: src-tauri
+        run: |
+          cargo fmt --check
+          if ($LASTEXITCODE -ne 0) { throw 'Rust formatting check failed.' }
+          cargo check --locked
+          if ($LASTEXITCODE -ne 0) { throw 'Rust compilation check failed.' }
+          cargo test --locked
+          if ($LASTEXITCODE -ne 0) { throw 'Rust tests failed.' }
+
+      - name: Build the configured NSIS installer
+        run: npm run desktop:build:windows -- --ci -- --locked
+
+      - name: Verify the bundle and generate checksums and runtime manifest
+        run: ./scripts/collect-windows-artifacts.ps1 -DownloadsFile "$env:RUNNER_TEMP/clinic-downloads/downloads.json"
+
+      - name: Upload the NSIS installer and verification files
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: clinic-system-windows-x64
+          path: release-artifacts/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+  release:
+    name: Publish a version-tag release
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Download this run's validated installer
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: clinic-system-windows-x64
+          path: release-artifacts
+
+      - name: Create release and upload assets through the official GitHub action
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const fs = require('node:fs');
+            const path = require('node:path');
+            const crypto = require('node:crypto');
+            const root = 'release-artifacts';
+            const manifest = JSON.parse(fs.readFileSync(path.join(root, 'runtime-versions.json'), 'utf8'));
+            const tag = context.ref.replace('refs/tags/', '');
+            if (tag !== `v${manifest.applicationVersion}` || manifest.bundle !== 'nsis' || manifest.architecture !== 'x64'
+              || manifest.commit !== context.sha || manifest.installer !== path.basename(manifest.installer)
+              || !manifest.installer.endsWith('.exe')) {
+              throw new Error('Artifact version, commit, architecture, or NSIS installer name is inconsistent.');
+            }
+            const names = [manifest.installer, `${manifest.installer}.sha256`, 'runtime-versions.json'];
+            const assets = names.map(name => {
+              const data = fs.readFileSync(path.join(root, name));
+              return { name, data, digest: `sha256:${crypto.createHash('sha256').update(data).digest('hex')}` };
+            });
+            if (assets[0].digest !== `sha256:${manifest.installerSha256}`
+              || assets[1].data.toString('utf8').trim() !== `${manifest.installerSha256}  ${manifest.installer}`) {
+              throw new Error('Installer SHA-256 verification failed after artifact download.');
+            }
+            const repo = context.repo;
+            const existing = await github.paginate(github.rest.repos.listReleases, { ...repo, per_page: 100 });
+            let release = existing.find(item => item.tag_name === tag);
+            if (release && !release.draft) {
+              if (assets.every(asset => release.assets.some(item => item.name === asset.name && item.digest === asset.digest))) {
+                core.info(`Release ${tag} already contains these exact assets.`);
+                return;
+              }
+              throw new Error(`Release ${tag} is already published. Refusing to replace published binaries; use a new version tag.`);
+            }
+            const r = manifest.runtimes;
+            const body = [
+              `Clinic System ${manifest.applicationVersion}: Windows x64 NSIS installer.`,
+              '',
+              `Embedded Rust backend with MySQL ${r.mysql.version}, VC++ x64 ${r.vcredist.version}, and offline WebView2 ${r.webview2.version}.`,
+              'SHA-256 checksums and the exact runtime download manifest are attached.',
+              '',
+              'Build success does not certify Windows 10/11 compatibility. Complete the clean, offline Windows acceptance checklist before customer delivery.',
+              `Testing and installation: https://github.com/${repo.owner}/${repo.repo}/blob/${context.sha}/docs/GITHUB_ACTIONS_WINDOWS_BUILD.md`,
+            ].join('\n');
+            if (!release) {
+              ({ data: release } = await github.rest.repos.createRelease({
+                ...repo, tag_name: tag, name: `Clinic System ${manifest.applicationVersion}`, body,
+                draft: true, prerelease: manifest.applicationVersion.includes('-'),
+              }));
+            }
+            for (const asset of assets) {
+              const old = release.assets.find(item => item.name === asset.name);
+              if (old?.digest === asset.digest) continue;
+              if (old) await github.rest.repos.deleteReleaseAsset({ ...repo, asset_id: old.id });
+              await github.rest.repos.uploadReleaseAsset({
+                ...repo, release_id: release.id, name: asset.name, data: asset.data,
+                headers: { 'content-type': 'application/octet-stream', 'content-length': asset.data.length },
+              });
+            }
+            await github.rest.repos.updateRelease({ ...repo, release_id: release.id, body, draft: false, make_latest: 'legacy' });
+            core.info(`Published ${tag} with its NSIS installer, SHA-256 file, and runtime versions.`);
