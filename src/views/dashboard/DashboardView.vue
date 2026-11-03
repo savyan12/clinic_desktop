@@ -24,7 +24,7 @@
           <div><h2 class="section-heading">جلسات اليوم</h2><span class="caption-text">كل جلسة تُغلق مباشرة عند تسجيلها</span></div>
           <router-link to="/sessions">عرض قسم الجلسات</router-link>
         </div>
-        <div class="filter-grid surface-card dashboard-filters">
+        <div class="filter-grid surface-card dashboard-filters" data-form-flow-filter>
           <v-text-field v-model="filters.search" label="بحث سريع" placeholder="الاسم أو رقم الهاتف" prepend-inner-icon="mdi-magnify" clearable />
           <v-select v-model="filters.doctor_id" label="الطبيب" :items="doctors" item-title="name" item-value="id" clearable :loading="loadingDoctors" />
           <v-select v-model="filters.status" label="الحالة" :items="statusItems" clearable />
@@ -40,7 +40,7 @@
             <tr v-for="session in items" :key="session.id" class="clickable-row" @click="router.push(`/sessions/${session.id}`)">
               <td class="ltr-value">{{ time(session.opened_at) }}</td>
               <td><strong>{{ session.patient.name }}</strong></td>
-              <td><span class="ltr-value">{{ session.patient.phone }}</span></td>
+              <td><span class="phone-value">{{ session.patient.phone }}</span></td>
               <td>{{ session.doctor.name }}</td>
               <td><span class="services-cell">{{ session.services.map((item) => item.name).join('، ') }}</span></td>
               <td><StatusChip type="coverage" :value="session.settlement.coverage" /></td>

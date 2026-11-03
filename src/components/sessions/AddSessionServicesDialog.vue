@@ -35,7 +35,7 @@
       </v-card-text>
       <v-card-actions class="dialog-actions">
         <v-btn variant="text" :disabled="saving" @click="close">تراجع</v-btn>
-        <v-btn color="primary" prepend-icon="mdi-plus-circle-outline" :loading="saving" :disabled="loadingOptions || Boolean(optionsError) || !selectedServices.length || invalidExtraOnly || walletInsufficient" @click="save">إضافة وتثبيت الخدمات</v-btn>
+        <v-btn color="primary" prepend-icon="mdi-plus-circle-outline" data-form-flow-primary :loading="saving" :disabled="loadingOptions || Boolean(optionsError) || !selectedServices.length || invalidExtraOnly || walletInsufficient" @click="save">إضافة وتثبيت الخدمات</v-btn>
       </v-card-actions>
     </v-card>
   </v-dialog>

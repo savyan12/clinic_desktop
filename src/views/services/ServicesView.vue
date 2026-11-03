@@ -7,7 +7,7 @@
       action-icon="mdi-plus"
       @action="openCreate"
     />
-    <div class="surface-card service-filter">
+    <div class="surface-card service-filter" data-form-flow-filter>
       <v-text-field
         v-model="search"
         label="بحث باسم الخدمة"
@@ -77,7 +77,7 @@
     v-model="form.reason"
     label="سبب تعديل السعر أو البيانات"
     rows="2"
-  /></v-card-text><v-card-actions class="dialog-actions"><v-btn variant="text" :disabled="saving" @click="dialog = false">إلغاء</v-btn><v-btn color="primary" :loading="saving" @click="save">حفظ</v-btn></v-card-actions></v-card></v-dialog>
+  /></v-card-text><v-card-actions class="dialog-actions"><v-btn variant="text" :disabled="saving" @click="dialog = false">إلغاء</v-btn><v-btn color="primary" data-form-flow-primary :loading="saving" @click="save">حفظ</v-btn></v-card-actions></v-card></v-dialog>
   <ConfirmDialog
     v-model="toggleDialog"
     :title="selected?.is_active ? 'تعطيل الخدمة' : 'إعادة تفعيل الخدمة'"

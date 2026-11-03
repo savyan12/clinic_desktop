@@ -3,7 +3,8 @@
     <template v-if="loading"><v-skeleton-loader type="heading, image, article" /></template>
     <InlineError v-else-if="error" :message="error" retry @retry="load" />
     <template v-else-if="patient">
-      <PageHeader :title="patient.name" :subtitle="`ملف المريض · ${patient.phone}`">
+      <PageHeader :title="patient.name">
+        <template #subtitle>ملف المريض · <bdi class="phone-value" dir="ltr">{{ patient.phone || '—' }}</bdi></template>
         <template #actions>
           <v-btn :to="`/print/statement/patient/${patient.id}`" variant="outlined" prepend-icon="mdi-printer-outline">كشف الحساب</v-btn>
           <v-btn variant="outlined" prepend-icon="mdi-wallet-membership" @click="subscriptionDialog = true">اشتراك جديد</v-btn>
@@ -13,7 +14,7 @@
 
       <section class="patient-identity surface-card">
         <div class="patient-avatar">{{ patient.name.charAt(0) }}</div>
-        <div class="identity-main"><h2>{{ patient.name }}</h2><span class="ltr-value">{{ patient.phone }}</span></div>
+        <div class="identity-main"><h2>{{ patient.name }}</h2><span class="phone-value">{{ patient.phone }}</span></div>
         <div><span>العمر</span><strong>{{ patient.age }} سنة</strong></div>
         <div><span>الجنس</span><strong>{{ labelFor('gender', patient.gender) }}</strong></div>
         <div><span>المنطقة</span><strong>{{ patient.area || '—' }}</strong></div>
@@ -33,11 +34,11 @@
             <h2 class="section-heading">البيانات الأساسية</h2>
             <div class="detail-grid">
               <div class="detail-item"><span class="detail-label">الاسم الكامل</span><strong>{{ patient.name }}</strong></div>
-              <div class="detail-item"><span class="detail-label">رقم الهاتف</span><strong class="ltr-value">{{ patient.phone }}</strong></div>
+              <div class="detail-item"><span class="detail-label">رقم الهاتف</span><strong class="phone-value">{{ patient.phone }}</strong></div>
               <div class="detail-item"><span class="detail-label">العمر</span><strong>{{ patient.age }} سنة</strong></div>
               <div class="detail-item"><span class="detail-label">الجنس</span><strong>{{ labelFor('gender', patient.gender) }}</strong></div>
               <div class="detail-item"><span class="detail-label">العنوان</span><strong>{{ patient.area || '—' }}</strong></div>
-              <div class="detail-item"><span class="detail-label">هاتف الطوارئ</span><strong class="ltr-value">{{ patient.emergency_phone || '—' }}</strong></div>
+              <div class="detail-item"><span class="detail-label">هاتف الطوارئ</span><strong class="phone-value">{{ patient.emergency_phone || '—' }}</strong></div>
               <div class="detail-item"><span class="detail-label">الجهة الراعية</span><strong>{{ patient.sponsor?.name || 'لا توجد' }}</strong></div>
               <div class="detail-item"><span class="detail-label">تاريخ إنشاء السجل</span><strong>{{ formatDate(patient.created_at) }}</strong></div>
             </div>

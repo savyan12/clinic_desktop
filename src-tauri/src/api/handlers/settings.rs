@@ -110,7 +110,7 @@ pub async fn update(
     ))
 }
 
-async fn get_or_create(state: &AppState) -> ApiResult<SettingRow> {
+pub(crate) async fn get_or_create(state: &AppState) -> ApiResult<SettingRow> {
     if let Some(setting) =
         sqlx::query_as::<_, SettingRow>("SELECT * FROM settings ORDER BY id LIMIT 1")
             .fetch_optional(&state.pool)

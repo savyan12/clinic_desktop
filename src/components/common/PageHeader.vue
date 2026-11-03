@@ -2,7 +2,7 @@
   <div class="page-header">
     <div>
       <h1>{{ title }}</h1>
-      <p v-if="subtitle">{{ subtitle }}</p>
+      <p v-if="subtitle || $slots.subtitle"><slot name="subtitle">{{ subtitle }}</slot></p>
     </div>
     <div class="page-actions">
       <slot name="actions">

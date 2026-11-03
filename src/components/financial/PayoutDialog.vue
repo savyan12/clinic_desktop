@@ -10,7 +10,7 @@
         <v-select v-model="form.method" label="طريقة الدفع" :items="paymentMethods" />
         <v-textarea v-model="form.note" label="ملاحظة أو مرجع" rows="2" />
       </v-card-text>
-      <v-card-actions class="dialog-actions"><v-btn variant="text" :disabled="saving" @click="close">إلغاء</v-btn><v-btn color="primary" :loading="saving" @click="save">تأكيد الصرف</v-btn></v-card-actions>
+      <v-card-actions class="dialog-actions"><v-btn variant="text" :disabled="saving" @click="close">إلغاء</v-btn><v-btn color="primary" data-form-flow-primary :loading="saving" @click="save">تأكيد الصرف</v-btn></v-card-actions>
     </v-card>
   </v-dialog>
 </template>

@@ -1,7 +1,7 @@
 use super::error::{ApiError, ApiResult};
 use printpdf::{
-    Color as PdfColor, FontId, Mm, Op, ParsedFont, PdfDocument, PdfPage, PdfSaveOptions, Pt, Rect,
-    Rgb, TextItem, TextMatrix,
+    Color as PdfColor, FontId, Mm, Op, ParsedFont, PdfDocument, PdfPage, PdfSaveOptions, Pt,
+    RawImage, Rect, Rgb, TextItem, TextMatrix, XObjectId, XObjectTransform,
 };
 use rust_xlsxwriter::{Color as XlsxColor, Format, FormatAlign, FormatBorder, Workbook, XlsxError};
 use serde_json::Value;
@@ -10,6 +10,7 @@ use unicode_bidi::{BidiInfo, Level};
 
 const REGULAR_FONT: &[u8] = include_bytes!("../../assets/fonts/DejaVuSans.ttf");
 const BOLD_FONT: &[u8] = include_bytes!("../../assets/fonts/DejaVuSans-Bold.ttf");
+const CLINIC_LOGO: &[u8] = include_bytes!("../../../public/clinic-logo-128.png");
 
 pub struct ExportedReport {
     pub bytes: Vec<u8>,
@@ -133,10 +134,7 @@ fn export_xlsx(report_type: &str, report: &Value) -> ApiResult<ExportedReport> {
                 let column_index = u16::try_from(column_index).map_err(|error| {
                     ApiError::internal(format!("Invalid column index: {error}"))
                 })?;
-                let value = row
-                    .get(column.key)
-                    .map(|value| display_value(column.key, value))
-                    .unwrap_or_default();
+                let value = display_row_value(report_type, column.key, row);
                 worksheet
                     .write_string_with_format(row_index, column_index, &value, &cell_format)
                     .map_err(xlsx_error)?;
@@ -156,10 +154,20 @@ fn export_xlsx(report_type: &str, report: &Value) -> ApiResult<ExportedReport> {
                 + u32::try_from(offset + 1)
                     .map_err(|error| ApiError::internal(format!("Invalid totals row: {error}")))?;
             worksheet
-                .write_string_with_format(row, 0, heading_label(key), &total_label_format)
+                .write_string_with_format(
+                    row,
+                    0,
+                    heading_label(report_type, key),
+                    &total_label_format,
+                )
                 .map_err(xlsx_error)?;
             worksheet
-                .write_string_with_format(row, 1, &display_value(key, value), &total_value_format)
+                .write_string_with_format(
+                    row,
+                    1,
+                    &display_value(report_type, key, value),
+                    &total_value_format,
+                )
                 .map_err(xlsx_error)?;
         }
     }
@@ -196,6 +204,9 @@ fn export_pdf(report_type: &str, report: &Value) -> ApiResult<ExportedReport> {
     let mut document = PdfDocument::new(report_title(report_type));
     let regular_id = document.add_font(&regular);
     let bold_id = document.add_font(&bold);
+    let logo_id = RawImage::decode_from_bytes(CLINIC_LOGO, &mut warnings)
+        .ok()
+        .map(|logo| document.add_image(&logo));
     let fonts = PdfFonts {
         regular_id,
         regular_face,
@@ -203,15 +214,16 @@ fn export_pdf(report_type: &str, report: &Value) -> ApiResult<ExportedReport> {
         bold_id,
         bold_face,
         bold_glyph_chars: glyph_char_map(BOLD_FONT)?,
+        logo_id,
     };
 
-    let page_width = Mm(297.0).into_pt();
-    let page_height = Mm(210.0).into_pt();
-    let margin = Pt(32.0);
+    let page_width = Mm(210.0).into_pt();
+    let page_height = Mm(297.0).into_pt();
+    let margin = Pt(34.0);
     let table_width = page_width - margin - margin;
-    let row_height = Pt(24.0);
-    let header_height = Pt(27.0);
-    let rows_per_page = 14usize;
+    let row_height = Pt(23.0);
+    let header_height = Pt(25.0);
+    let rows_per_page = 23usize;
     let page_count = rows.len().max(1).div_ceil(rows_per_page);
     let widths = pdf_column_widths(&columns, table_width);
     let mut pages = Vec::with_capacity(page_count);
@@ -230,10 +242,43 @@ fn export_pdf(report_type: &str, report: &Value) -> ApiResult<ExportedReport> {
             page_index + 1,
             page_count,
         );
-        let table_top = page_height - Pt(92.0);
+        draw_summary_cards(
+            &mut ops,
+            &fonts,
+            report_type,
+            totals,
+            margin,
+            page_width - margin,
+            page_height - Pt(116.0),
+        );
+        draw_text_right(
+            &mut ops,
+            &fonts.bold_face,
+            &fonts.bold_glyph_chars,
+            &fonts.bold_id,
+            "بيانات التقرير",
+            Pt(11.5),
+            page_width - margin,
+            page_height - Pt(177.0),
+            table_width,
+            ink(),
+        );
+        draw_box(
+            &mut ops,
+            Rect {
+                x: margin,
+                y: page_height - Pt(183.0),
+                width: table_width,
+                height: Pt(1.5),
+            },
+            brand(),
+            false,
+        );
+        let table_top = page_height - Pt(190.0);
         draw_table_row(
             &mut ops,
             &fonts,
+            report_type,
             &columns,
             &widths,
             margin,
@@ -275,6 +320,7 @@ fn export_pdf(report_type: &str, report: &Value) -> ApiResult<ExportedReport> {
                 draw_table_row(
                     &mut ops,
                     &fonts,
+                    report_type,
                     &columns,
                     &widths,
                     margin,
@@ -286,13 +332,14 @@ fn export_pdf(report_type: &str, report: &Value) -> ApiResult<ExportedReport> {
             }
         }
 
-        if page_index + 1 == page_count {
-            let used_rows = end.saturating_sub(start).max(1);
-            let totals_top =
-                table_top - header_height - Pt(row_height.0 * used_rows as f32) - Pt(18.0);
-            draw_totals(&mut ops, &fonts, totals, page_width - margin, totals_top);
-        }
-        pages.push(PdfPage::new(Mm(297.0), Mm(210.0), ops));
+        draw_page_footer(
+            &mut ops,
+            &fonts,
+            report,
+            page_width,
+            page_number_label(page_index + 1, page_count),
+        );
+        pages.push(PdfPage::new(Mm(210.0), Mm(297.0), ops));
     }
 
     document.with_pages(pages);
@@ -314,6 +361,7 @@ struct PdfFonts<'a> {
     bold_id: FontId,
     bold_face: rustybuzz::Face<'a>,
     bold_glyph_chars: HashMap<u16, char>,
+    logo_id: Option<XObjectId>,
 }
 
 fn draw_page_header(
@@ -326,16 +374,55 @@ fn draw_page_header(
     page_number: usize,
     page_count: usize,
 ) {
-    draw_box(
+    let margin = Pt(34.0);
+    let content_width = page_width - margin - margin;
+    let clinic_name = clinic_value(report, "clinic_name", "عيادة عين الحياة");
+    let clinic_subtitle = clinic_value(report, "clinic_subtitle", "للعلاج الطبيعي والتأهيل");
+    let show_logo = report
+        .pointer("/meta/clinic/show_logo")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let brand_right = if show_logo {
+        if let Some(logo_id) = &fonts.logo_id {
+            ops.push(Op::UseXobject {
+                id: logo_id.clone(),
+                transform: XObjectTransform {
+                    translate_x: Some(page_width - margin - Pt(40.0)),
+                    translate_y: Some(page_height - Pt(54.0)),
+                    dpi: Some(230.0),
+                    ..Default::default()
+                },
+            });
+            page_width - margin - Pt(48.0)
+        } else {
+            page_width - margin
+        }
+    } else {
+        page_width - margin
+    };
+    draw_text_right(
         ops,
-        Rect {
-            x: Pt(0.0),
-            y: page_height,
-            width: page_width,
-            height: Pt(58.0),
-        },
-        PdfColor::Rgb(rgb(0.0, 0.4, 0.8)),
-        false,
+        &fonts.bold_face,
+        &fonts.bold_glyph_chars,
+        &fonts.bold_id,
+        &clinic_name,
+        Pt(18.0),
+        brand_right,
+        page_height - Pt(29.0),
+        Pt(235.0),
+        brand_dark(),
+    );
+    draw_text_right(
+        ops,
+        &fonts.regular_face,
+        &fonts.regular_glyph_chars,
+        &fonts.regular_id,
+        &clinic_subtitle,
+        Pt(9.5),
+        brand_right,
+        page_height - Pt(46.0),
+        Pt(235.0),
+        muted(),
     );
     draw_text_right(
         ops,
@@ -343,37 +430,200 @@ fn draw_page_header(
         &fonts.bold_glyph_chars,
         &fonts.bold_id,
         report_title(report_type),
-        Pt(19.0),
-        page_width - Pt(32.0),
-        page_height - Pt(31.0),
-        page_width - Pt(64.0),
-        PdfColor::Rgb(rgb(1.0, 1.0, 1.0)),
-    );
-    let meta = format!(
-        "{} | {} | صفحة {} من {}",
-        period_label(report),
-        generated_label(report),
-        page_number,
-        page_count
+        Pt(15.0),
+        margin + Pt(220.0),
+        page_height - Pt(29.0),
+        Pt(220.0),
+        ink(),
     );
     draw_text_right(
         ops,
         &fonts.regular_face,
         &fonts.regular_glyph_chars,
         &fonts.regular_id,
-        &meta,
-        Pt(8.5),
-        page_width - Pt(32.0),
-        page_height - Pt(48.0),
-        page_width - Pt(64.0),
-        PdfColor::Rgb(rgb(0.9, 0.94, 1.0)),
+        &format!(
+            "{} · صفحة {} من {}",
+            generated_label(report),
+            page_number,
+            page_count
+        ),
+        Pt(7.5),
+        margin + Pt(220.0),
+        page_height - Pt(46.0),
+        Pt(220.0),
+        muted(),
     );
+    draw_box(
+        ops,
+        Rect {
+            x: margin,
+            y: page_height - Pt(61.0),
+            width: content_width,
+            height: Pt(2.0),
+        },
+        brand(),
+        false,
+    );
+    draw_box(
+        ops,
+        Rect {
+            x: margin,
+            y: page_height - Pt(73.0),
+            width: content_width,
+            height: Pt(31.0),
+        },
+        PdfColor::Rgb(rgb(1.0, 1.0, 1.0)),
+        true,
+    );
+    draw_text_right(
+        ops,
+        &fonts.regular_face,
+        &fonts.regular_glyph_chars,
+        &fonts.regular_id,
+        "الفترة",
+        Pt(7.0),
+        page_width - margin - Pt(8.0),
+        page_height - Pt(84.0),
+        content_width - Pt(16.0),
+        muted(),
+    );
+    draw_text_right(
+        ops,
+        &fonts.bold_face,
+        &fonts.bold_glyph_chars,
+        &fonts.bold_id,
+        &period_label(report),
+        Pt(9.0),
+        page_width - margin - Pt(8.0),
+        page_height - Pt(98.0),
+        content_width - Pt(16.0),
+        ink(),
+    );
+}
+
+fn draw_summary_cards(
+    ops: &mut Vec<Op>,
+    fonts: &PdfFonts<'_>,
+    report_type: &str,
+    totals: &serde_json::Map<String, Value>,
+    left: Pt,
+    right: Pt,
+    top: Pt,
+) {
+    let keys = total_keys(report_type)
+        .iter()
+        .filter(|key| totals.contains_key(**key))
+        .copied()
+        .collect::<Vec<_>>();
+    if keys.is_empty() {
+        return;
+    }
+    let gap = Pt(6.0);
+    let available = right - left - Pt(gap.0 * keys.len().saturating_sub(1) as f32);
+    let width = Pt(available.0 / keys.len() as f32);
+    let height = Pt(43.0);
+    let mut card_right = right;
+    for key in keys {
+        let rect = Rect {
+            x: card_right - width,
+            y: top,
+            width,
+            height,
+        };
+        draw_box(ops, rect.clone(), tint(), true);
+        draw_text_right(
+            ops,
+            &fonts.regular_face,
+            &fonts.regular_glyph_chars,
+            &fonts.regular_id,
+            heading_label(report_type, key),
+            Pt(7.0),
+            rect.x + rect.width - Pt(6.0),
+            top - Pt(13.0),
+            rect.width - Pt(12.0),
+            muted(),
+        );
+        if let Some(value) = totals.get(key) {
+            draw_text_right(
+                ops,
+                &fonts.bold_face,
+                &fonts.bold_glyph_chars,
+                &fonts.bold_id,
+                &display_value(report_type, key, value),
+                Pt(10.5),
+                rect.x + rect.width - Pt(6.0),
+                top - Pt(31.0),
+                rect.width - Pt(12.0),
+                ink(),
+            );
+        }
+        card_right = rect.x - gap;
+    }
+}
+
+fn draw_page_footer(
+    ops: &mut Vec<Op>,
+    fonts: &PdfFonts<'_>,
+    report: &Value,
+    page_width: Pt,
+    page_label: String,
+) {
+    let margin = Pt(34.0);
+    let content_width = page_width - margin - margin;
+    draw_box(
+        ops,
+        Rect {
+            x: margin,
+            y: Pt(43.0),
+            width: content_width,
+            height: Pt(0.8),
+        },
+        print_border(),
+        false,
+    );
+    let contact = [
+        clinic_value(report, "address", ""),
+        clinic_value(report, "phone", ""),
+    ]
+    .into_iter()
+    .filter(|value| !value.is_empty())
+    .collect::<Vec<_>>()
+    .join(" · ");
+    draw_text_right(
+        ops,
+        &fonts.regular_face,
+        &fonts.regular_glyph_chars,
+        &fonts.regular_id,
+        if contact.is_empty() { "—" } else { &contact },
+        Pt(7.0),
+        page_width - margin,
+        Pt(29.0),
+        content_width - Pt(80.0),
+        muted(),
+    );
+    draw_text_right(
+        ops,
+        &fonts.regular_face,
+        &fonts.regular_glyph_chars,
+        &fonts.regular_id,
+        &page_label,
+        Pt(7.0),
+        margin + Pt(72.0),
+        Pt(29.0),
+        Pt(72.0),
+        muted(),
+    );
+}
+
+fn page_number_label(page_number: usize, page_count: usize) -> String {
+    format!("صفحة {page_number} من {page_count}")
 }
 
 #[allow(clippy::too_many_arguments)]
 fn draw_table_row(
     ops: &mut Vec<Op>,
     fonts: &PdfFonts<'_>,
+    report_type: &str,
     columns: &[ExportColumn],
     widths: &[Pt],
     left: Pt,
@@ -399,7 +649,7 @@ fn draw_table_row(
             ops,
             rect.clone(),
             if header {
-                PdfColor::Rgb(rgb(0.961, 0.961, 0.969))
+                brand()
             } else {
                 PdfColor::Rgb(rgb(1.0, 1.0, 1.0))
             },
@@ -408,8 +658,7 @@ fn draw_table_row(
         let text = if header {
             column.label.to_string()
         } else {
-            row.and_then(|value| value.get(column.key))
-                .map(|value| display_value(column.key, value))
+            row.map(|value| display_row_value(report_type, column.key, value))
                 .unwrap_or_default()
         };
         let (face, glyph_chars, font_id, size) = if header {
@@ -417,14 +666,14 @@ fn draw_table_row(
                 &fonts.bold_face,
                 &fonts.bold_glyph_chars,
                 &fonts.bold_id,
-                Pt(8.3),
+                Pt(7.4),
             )
         } else {
             (
                 &fonts.regular_face,
                 &fonts.regular_glyph_chars,
                 &fonts.regular_id,
-                Pt(7.8),
+                Pt(7.1),
             )
         };
         draw_text_right(
@@ -437,84 +686,13 @@ fn draw_table_row(
             rect.x + rect.width - Pt(5.0),
             rect.y - Pt((rect.height.0 + size.0) / 2.0) + Pt(2.0),
             rect.width - Pt(10.0),
-            ink(),
+            if header {
+                PdfColor::Rgb(rgb(1.0, 1.0, 1.0))
+            } else {
+                ink()
+            },
         );
         right = rect.x;
-    }
-}
-
-fn draw_totals(
-    ops: &mut Vec<Op>,
-    fonts: &PdfFonts<'_>,
-    totals: &serde_json::Map<String, Value>,
-    right: Pt,
-    top: Pt,
-) {
-    let label_width = Pt(135.0);
-    let value_width = Pt(105.0);
-    let height = Pt(21.0);
-    draw_text_right(
-        ops,
-        &fonts.bold_face,
-        &fonts.bold_glyph_chars,
-        &fonts.bold_id,
-        "الإجماليات",
-        Pt(11.0),
-        right,
-        top - Pt(12.0),
-        label_width + value_width,
-        ink(),
-    );
-    for (index, (key, value)) in totals.iter().enumerate() {
-        let row_top = top - Pt(20.0 + height.0 * index as f32);
-        let value_rect = Rect {
-            x: right - value_width,
-            y: row_top,
-            width: value_width,
-            height,
-        };
-        let label_rect = Rect {
-            x: value_rect.x - label_width,
-            y: row_top,
-            width: label_width,
-            height,
-        };
-        draw_box(
-            ops,
-            label_rect.clone(),
-            PdfColor::Rgb(rgb(0.961, 0.961, 0.969)),
-            true,
-        );
-        draw_box(
-            ops,
-            value_rect.clone(),
-            PdfColor::Rgb(rgb(1.0, 1.0, 1.0)),
-            true,
-        );
-        draw_text_right(
-            ops,
-            &fonts.bold_face,
-            &fonts.bold_glyph_chars,
-            &fonts.bold_id,
-            heading_label(key),
-            Pt(8.5),
-            label_rect.x + label_rect.width - Pt(5.0),
-            row_top - Pt(13.5),
-            label_rect.width - Pt(10.0),
-            ink(),
-        );
-        draw_text_right(
-            ops,
-            &fonts.regular_face,
-            &fonts.regular_glyph_chars,
-            &fonts.regular_id,
-            &display_value(key, value),
-            Pt(8.5),
-            value_rect.x + value_rect.width - Pt(5.0),
-            row_top - Pt(13.5),
-            value_rect.width - Pt(10.0),
-            ink(),
-        );
     }
 }
 
@@ -526,7 +704,7 @@ fn draw_box(ops: &mut Vec<Op>, rect: Rect, fill: PdfColor, border: bool) {
     });
     if border {
         ops.push(Op::SetOutlineColor {
-            col: PdfColor::Rgb(rgb(0.878, 0.878, 0.878)),
+            col: print_border(),
         });
         ops.push(Op::SetOutlineThickness { pt: Pt(0.55) });
         ops.push(Op::DrawLine {
@@ -738,47 +916,44 @@ fn pdf_column_widths(columns: &[ExportColumn], total: Pt) -> Vec<Pt> {
 fn columns(report_type: &str) -> ApiResult<Vec<ExportColumn>> {
     let columns = match report_type {
         "sessions" => vec![
-            column("opened_at", "تاريخ الجلسة", 22.0, 1.35),
-            column("patient", "المريض", 24.0, 1.35),
+            column("opened_at", "التاريخ", 22.0, 1.15),
+            column("patient", "المريض", 24.0, 1.3),
             column("doctor", "الطبيب", 21.0, 1.15),
-            column("services", "الخدمات", 38.0, 2.35),
-            column("net_total", "القيمة الصافية", 16.0, 0.95),
-            column("status", "الحالة", 13.0, 0.75),
+            column("services", "الخدمات", 38.0, 1.9),
+            column("net_total", "القيمة", 16.0, 1.05),
+            column("status", "الحالة", 13.0, 0.9),
         ],
         "collections" => vec![
             column("created_at", "التاريخ", 22.0, 1.2),
             column("type", "النوع", 22.0, 1.25),
             column("patient", "المريض", 25.0, 1.45),
-            column("method", "طريقة الدفع", 18.0, 1.0),
+            column("method", "الطريقة", 18.0, 1.0),
             column("amount", "المبلغ", 16.0, 0.9),
         ],
         "debts" => vec![
-            column("id", "الرقم", 10.0, 0.55),
-            column("patient", "المريض", 23.0, 1.35),
-            column("sponsor", "الجهة الراعية", 23.0, 1.35),
-            column("amount", "القيمة الأصلية", 16.0, 0.9),
-            column("paid_amount", "المدفوع", 16.0, 0.9),
-            column("remaining", "المتبقي", 16.0, 0.9),
-            column("status", "الحالة", 13.0, 0.75),
+            column("id", "المرجع", 10.0, 0.72),
+            column("patient", "المريض", 23.0, 1.3),
+            column("sponsor", "المسؤول", 23.0, 1.15),
+            column("amount", "الأصل", 16.0, 1.0),
+            column("paid_amount", "المسدد", 16.0, 1.0),
+            column("remaining", "المتبقي", 16.0, 1.0),
+            column("status", "الحالة", 13.0, 1.0),
         ],
         "doctor-dues" => vec![
-            column("name", "الاسم", 25.0, 1.45),
-            column("sessions_count", "عدد الجلسات", 16.0, 0.9),
-            column("earned", "المستحق المكتسب", 18.0, 1.05),
-            column("paid", "المدفوع", 16.0, 0.9),
-            column("remaining", "المتبقي", 16.0, 0.9),
+            column("name", "الطبيب", 25.0, 1.45),
+            column("sessions_count", "الجلسات", 16.0, 0.9),
+            column("earned", "المكتسب", 18.0, 1.05),
+            column("paid", "المصروف", 16.0, 1.0),
+            column("remaining", "المتبقي", 16.0, 1.05),
         ],
         "subscriptions" => vec![
-            column("patient", "المريض", 22.0, 1.25),
-            column("plan_type", "نوع الاشتراك", 16.0, 0.95),
-            column("start_date", "تاريخ البداية", 15.0, 0.85),
-            column("end_date", "تاريخ النهاية", 15.0, 0.85),
-            column("sessions_count", "عدد الجلسات", 13.0, 0.75),
-            column("sessions_used", "المستخدمة", 13.0, 0.72),
-            column("remaining", "المتبقية", 13.0, 0.72),
-            column("remaining_days", "الأيام المتبقية", 14.0, 0.8),
-            column("net_total", "القيمة الصافية", 16.0, 0.9),
-            column("status", "الحالة", 13.0, 0.7),
+            column("patient", "المريض", 22.0, 1.35),
+            column("plan_type", "النوع", 16.0, 0.9),
+            column("start_date", "البداية", 15.0, 1.0),
+            column("subscription_end", "النهاية", 15.0, 1.0),
+            column("subscription_remaining", "المتبقي", 17.0, 1.15),
+            column("net_total", "القيمة", 16.0, 0.95),
+            column("status", "الحالة", 13.0, 0.9),
         ],
         _ => {
             return Err(ApiError::new(
@@ -824,12 +999,14 @@ fn period_label(report: &Value) -> String {
         .and_then(|value| value.get("to"))
         .and_then(Value::as_str);
     match (from, to) {
-        (Some(from), Some(to)) => {
-            format!("الفترة: من \u{2066}{from}\u{2069} إلى \u{2066}{to}\u{2069}")
-        }
-        (Some(from), None) => format!("الفترة: من \u{2066}{from}\u{2069}"),
-        (None, Some(to)) => format!("الفترة: حتى \u{2066}{to}\u{2069}"),
-        (None, None) => "الفترة: كل الفترات".to_string(),
+        (Some(from), Some(to)) => format!(
+            "من {} إلى {}",
+            format_report_date(from),
+            format_report_date(to)
+        ),
+        (Some(from), None) => format!("من {}", format_report_date(from)),
+        (None, Some(to)) => format!("حتى {}", format_report_date(to)),
+        (None, None) => "كل الفترات".to_string(),
     }
 }
 
@@ -839,17 +1016,54 @@ fn generated_label(report: &Value) -> String {
         .and_then(Value::as_str)
         .unwrap_or("");
     let generated = chrono::DateTime::parse_from_rfc3339(generated)
-        .map(|value| value.format("%Y-%m-%d %H:%M").to_string())
+        .map(|value| {
+            format!(
+                "{}، {}",
+                format_naive_date(value.date_naive()),
+                value.format("%H:%M")
+            )
+        })
         .unwrap_or_else(|_| generated.to_string());
-    format!("تاريخ الإعداد: \u{2066}{generated}\u{2069}")
+    format!("أُعد في {generated}")
 }
 
-fn display_value(key: &str, value: &Value) -> String {
+fn display_row_value(report_type: &str, key: &str, row: &Value) -> String {
+    if key == "subscription_end" {
+        return row
+            .get("end_date")
+            .filter(|value| !value.is_null())
+            .or_else(|| row.get("expected_end_date"))
+            .map(|value| display_value(report_type, "end_date", value))
+            .unwrap_or_else(|| "—".to_string());
+    }
+    if key == "subscription_remaining" {
+        let plan_type = row.get("plan_type").and_then(Value::as_str).unwrap_or("");
+        let (value_key, unit) = if plan_type == "monthly" {
+            ("remaining_days", "يوم")
+        } else {
+            ("remaining", "جلسة")
+        };
+        let value = row
+            .get(value_key)
+            .map(scalar_text)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "0".to_string());
+        return format!("\u{2066}{value}\u{2069} {unit}");
+    }
+    if key == "sponsor" && row.get(key).is_none_or(Value::is_null) {
+        return "المريض".to_string();
+    }
+    row.get(key)
+        .map(|value| display_value(report_type, key, value))
+        .unwrap_or_else(|| "—".to_string())
+}
+
+fn display_value(report_type: &str, key: &str, value: &Value) -> String {
     if matches!(key, "patient" | "doctor" | "sponsor") {
         return value
             .get("name")
             .and_then(Value::as_str)
-            .unwrap_or("")
+            .unwrap_or("—")
             .to_string();
     }
     if key == "services" {
@@ -862,10 +1076,11 @@ fn display_value(key: &str, value: &Value) -> String {
                     .collect::<Vec<_>>()
                     .join("، ")
             })
-            .unwrap_or_default();
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "—".to_string());
     }
     let raw = match value {
-        Value::Null => return String::new(),
+        Value::Null => return "—".to_string(),
         Value::Bool(value) => {
             if *value {
                 "نعم".to_string()
@@ -877,53 +1092,165 @@ fn display_value(key: &str, value: &Value) -> String {
         Value::String(value) => value.clone(),
         other => other.to_string(),
     };
-    enum_label(&raw).unwrap_or(&raw).to_string()
+    if matches!(key, "opened_at" | "created_at" | "start_date" | "end_date") {
+        return format_report_date(&raw);
+    }
+    if is_money_key(key) {
+        return format_money(&raw);
+    }
+    if key == "id" {
+        return format!("#\u{2066}{raw}\u{2069}");
+    }
+    enum_label(report_type, key, &raw)
+        .unwrap_or(&raw)
+        .to_string()
 }
 
-fn enum_label(value: &str) -> Option<&'static str> {
-    Some(match value {
-        "open" => "مفتوحة",
-        "closed" => "مغلقة",
-        "cancelled" => "ملغاة",
-        "active" => "نشط",
-        "completed" => "مكتمل",
-        "stopped" => "موقوف",
-        "monthly" => "شهري",
-        "legacy_package" => "حزمة جلسات قديمة",
-        "partial" => "جزئي",
-        "paid" => "مسدد",
-        "void" => "ملغى",
-        "cash" => "نقدًا",
-        "transfer" => "تحويل مصرفي",
-        "session_payment" => "دفعة جلسة",
-        "subscription_payment" => "دفعة اشتراك",
-        "wallet_topup" => "شحن رصيد",
-        "debt_payment" => "تسديد دين",
-        "refund" => "استرجاع",
-        "adjustment" => "تصحيح",
-        "session" => "جلسة",
-        "subscription" => "اشتراك",
-        "opening" => "دين افتتاحي",
+fn enum_label(report_type: &str, key: &str, value: &str) -> Option<&'static str> {
+    Some(match (key, value) {
+        ("status", "open") if report_type == "sessions" => "مفتوحة",
+        ("status", "open") => "مفتوح",
+        ("status", "closed") => "مغلقة",
+        ("status", "cancelled") if report_type == "subscriptions" => "ملغي",
+        ("status", "cancelled") => "ملغاة",
+        ("status", "active") => "نشط",
+        ("status", "completed") => "مكتمل",
+        ("status", "stopped") => "موقوف",
+        ("status", "partial") => "جزئي",
+        ("status", "paid") => "مسدد",
+        ("status", "void") => "ملغى",
+        ("plan_type", "monthly") => "شهري",
+        ("plan_type", "legacy_package") => "حزمة جلسات",
+        ("method", "cash") => "نقدًا",
+        ("method", "transfer") => "تحويل مصرفي",
+        ("type", "session_payment") => "دفعة جلسة",
+        ("type", "subscription_payment") => "دفعة اشتراك",
+        ("type", "wallet_topup") => "شحن رصيد",
+        ("type", "debt_payment") => "تسديد دين",
+        ("type", "refund") => "استرجاع",
+        ("type", "adjustment") => "تسوية",
+        ("kind", "session") => "جلسة",
+        ("kind", "subscription") => "اشتراك",
+        ("kind", "opening") => "دين افتتاحي",
+        (_, "open") => "مفتوح",
+        (_, "closed") => "مغلقة",
+        (_, "cancelled") => "ملغاة",
+        (_, "active") => "نشط",
         _ => return None,
     })
 }
 
-fn heading_label(key: &str) -> &str {
-    match key {
-        "count" => "العدد",
-        "service_value" => "قيمة الخدمات",
-        "received" => "المقبوضات",
-        "refunds" => "الاسترجاعات",
-        "net" => "الصافي",
-        "original" => "القيمة الأصلية",
-        "paid" => "المدفوع",
-        "remaining" => "المتبقي",
-        "earned" => "المستحق المكتسب",
-        "active" => "الاشتراكات النشطة",
-        "remaining_sessions" => "الجلسات المتبقية",
-        "net_total" => "القيمة الصافية",
-        other => other,
+fn heading_label<'a>(report_type: &str, key: &'a str) -> &'a str {
+    match (report_type, key) {
+        ("sessions", "count") => "عدد الجلسات",
+        ("subscriptions", "count") => "عدد الاشتراكات",
+        (_, "service_value") => "قيمة الخدمات",
+        (_, "received") => "إجمالي المقبوضات",
+        (_, "refunds") => "إجمالي الاسترجاعات",
+        (_, "net") => "صافي المقبوضات",
+        (_, "original") => "إجمالي الديون",
+        ("doctor-dues", "paid") => "إجمالي المصروف",
+        (_, "paid") => "إجمالي المسدد",
+        (_, "remaining") => "إجمالي المتبقي",
+        (_, "earned") => "إجمالي المستحق المكتسب",
+        (_, "active") => "الاشتراكات النشطة",
+        (_, "remaining_sessions") => "الجلسات المتبقية",
+        (_, "net_total") => "قيمة الاشتراكات",
+        (_, other) => other,
     }
+}
+
+fn total_keys(report_type: &str) -> &'static [&'static str] {
+    match report_type {
+        "sessions" => &["count", "service_value"],
+        "collections" => &["received", "refunds", "net"],
+        "debts" => &["original", "paid", "remaining"],
+        "doctor-dues" => &["earned", "paid", "remaining"],
+        "subscriptions" => &["count", "active", "remaining_sessions", "net_total"],
+        _ => &[],
+    }
+}
+
+fn is_money_key(key: &str) -> bool {
+    matches!(
+        key,
+        "service_value"
+            | "received"
+            | "refunds"
+            | "net"
+            | "original"
+            | "paid"
+            | "remaining"
+            | "earned"
+            | "net_total"
+            | "amount"
+            | "paid_amount"
+    )
+}
+
+fn format_money(value: &str) -> String {
+    let number = trim_decimal(value);
+    format!("\u{2066}{number}\u{2069} د.ل")
+}
+
+fn trim_decimal(value: &str) -> String {
+    let value = value.trim();
+    let Some((whole, fraction)) = value.split_once('.') else {
+        return value.to_string();
+    };
+    let fraction = fraction.trim_end_matches('0');
+    if fraction.is_empty() {
+        whole.to_string()
+    } else {
+        format!("{whole}.{fraction}")
+    }
+}
+
+fn scalar_text(value: &Value) -> String {
+    match value {
+        Value::Null => String::new(),
+        Value::Bool(value) => value.to_string(),
+        Value::Number(value) => value.to_string(),
+        Value::String(value) => value.clone(),
+        other => other.to_string(),
+    }
+}
+
+fn format_report_date(value: &str) -> String {
+    let date = chrono::DateTime::parse_from_rfc3339(value)
+        .map(|value| value.date_naive())
+        .or_else(|_| chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d"));
+    date.map(format_naive_date)
+        .unwrap_or_else(|_| value.to_string())
+}
+
+fn format_naive_date(value: chrono::NaiveDate) -> String {
+    use chrono::Datelike;
+    let months = [
+        "يناير",
+        "فبراير",
+        "مارس",
+        "أبريل",
+        "مايو",
+        "يونيو",
+        "يوليو",
+        "أغسطس",
+        "سبتمبر",
+        "أكتوبر",
+        "نوفمبر",
+        "ديسمبر",
+    ];
+    let month = months[value.month0() as usize];
+    format!("{} {month} {}", value.day(), value.year())
+}
+
+fn clinic_value(report: &Value, key: &str, fallback: &str) -> String {
+    report
+        .pointer(&format!("/meta/clinic/{key}"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(fallback)
+        .to_string()
 }
 
 fn xlsx_error(error: XlsxError) -> ApiError {
@@ -943,10 +1270,33 @@ fn ink() -> PdfColor {
     PdfColor::Rgb(rgb(0.114, 0.114, 0.122))
 }
 
+fn brand() -> PdfColor {
+    PdfColor::Rgb(rgb(0.0, 0.471, 0.31))
+}
+
+fn brand_dark() -> PdfColor {
+    PdfColor::Rgb(rgb(0.0, 0.412, 0.294))
+}
+
+fn tint() -> PdfColor {
+    PdfColor::Rgb(rgb(0.918, 0.957, 0.937))
+}
+
+fn muted() -> PdfColor {
+    PdfColor::Rgb(rgb(0.337, 0.384, 0.467))
+}
+
+fn print_border() -> PdfColor {
+    PdfColor::Rgb(rgb(0.788, 0.831, 0.886))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{export, glyph_char_map, shape_visual_runs, REGULAR_FONT};
-    use printpdf::Pt;
+    use super::{
+        columns, display_row_value, export, glyph_char_map, shape_visual_runs, CLINIC_LOGO,
+        REGULAR_FONT,
+    };
+    use printpdf::{Pt, RawImage};
     use serde_json::json;
 
     fn report() -> serde_json::Value {
@@ -970,10 +1320,11 @@ mod tests {
     }
 
     fn visual_report() -> serde_json::Value {
-        let rows = (1..=17)
+        let rows = (1..=45)
             .map(|index| {
+                let day = ((index - 1) % 28) + 1;
                 json!({
-                    "opened_at": format!("2026-11-{index:02}T10:30:00+02:00"),
+                    "opened_at": format!("2026-11-{day:02}T10:30:00+02:00"),
                     "patient": { "name": format!("المريض العربي رقم {index}") },
                     "doctor": { "name": if index % 2 == 0 { "د. أحمد السنوسي" } else { "د. سارة الفيتوري" } },
                     "services": [
@@ -987,7 +1338,7 @@ mod tests {
             .collect::<Vec<_>>();
         json!({
             "rows": rows,
-            "totals": { "count": 17, "service_value": "1530.500" },
+            "totals": { "count": 45, "service_value": "10350.500" },
             "meta": {
                 "type": "sessions",
                 "from": "2026-11-01",
@@ -1004,6 +1355,83 @@ mod tests {
         let pdf = export("sessions", "pdf", &report()).unwrap();
         assert!(pdf.bytes.starts_with(b"%PDF-"));
         assert!(pdf.bytes.len() > 10_000);
+    }
+
+    #[test]
+    fn bundled_clinic_logo_decodes_for_pdf_headers() {
+        RawImage::decode_from_bytes(CLINIC_LOGO, &mut Vec::new())
+            .expect("the bundled clinic logo must decode");
+    }
+
+    #[test]
+    fn report_exports_use_the_same_compact_columns_and_arabic_values() {
+        let expectations = [
+            (
+                "sessions",
+                vec!["التاريخ", "المريض", "الطبيب", "الخدمات", "القيمة", "الحالة"],
+            ),
+            (
+                "collections",
+                vec!["التاريخ", "النوع", "المريض", "الطريقة", "المبلغ"],
+            ),
+            (
+                "debts",
+                vec![
+                    "المرجع",
+                    "المريض",
+                    "المسؤول",
+                    "الأصل",
+                    "المسدد",
+                    "المتبقي",
+                    "الحالة",
+                ],
+            ),
+            (
+                "doctor-dues",
+                vec!["الطبيب", "الجلسات", "المكتسب", "المصروف", "المتبقي"],
+            ),
+            (
+                "subscriptions",
+                vec![
+                    "المريض",
+                    "النوع",
+                    "البداية",
+                    "النهاية",
+                    "المتبقي",
+                    "القيمة",
+                    "الحالة",
+                ],
+            ),
+        ];
+        for (report_type, expected) in expectations {
+            assert_eq!(
+                columns(report_type)
+                    .unwrap()
+                    .iter()
+                    .map(|column| column.label)
+                    .collect::<Vec<_>>(),
+                expected
+            );
+        }
+
+        let subscription = json!({
+            "plan_type": "monthly",
+            "remaining_days": 8,
+            "end_date": null,
+            "expected_end_date": "2026-11-30"
+        });
+        assert_eq!(
+            display_row_value("subscriptions", "subscription_remaining", &subscription),
+            "\u{2066}8\u{2069} يوم"
+        );
+        assert_eq!(
+            display_row_value("subscriptions", "subscription_end", &subscription),
+            "30 نوفمبر 2026"
+        );
+        assert_eq!(
+            display_row_value("debts", "sponsor", &json!({ "sponsor": null })),
+            "المريض"
+        );
     }
 
     #[test]

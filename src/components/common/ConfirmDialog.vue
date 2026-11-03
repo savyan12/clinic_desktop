@@ -15,7 +15,7 @@
       </v-card-text>
       <v-card-actions class="dialog-actions">
         <v-btn variant="text" :disabled="loading" @click="cancel">تراجع</v-btn>
-        <v-btn :color="danger ? 'error' : 'primary'" :loading="loading" @click="confirm">{{ confirmLabel }}</v-btn>
+        <v-btn :color="danger ? 'error' : 'primary'" data-form-flow-primary :loading="loading" @click="confirm">{{ confirmLabel }}</v-btn>
       </v-card-actions>
     </v-card>
   </v-dialog>
@@ -50,4 +50,3 @@ function confirm() {
 .dialog-message { margin: 0 0 20px; color: var(--color-ink-muted); line-height: 1.7; }
 .dialog-actions { gap: 8px; justify-content: flex-end; padding: 8px 24px 24px; }
 </style>
-

@@ -1,6 +1,7 @@
 use crate::api::{
     auth::AuthUser,
     error::{ApiError, ApiResult},
+    resources,
     services::reports::{self, ReportFilters},
     AppState,
 };
@@ -51,7 +52,11 @@ pub async fn export(
     auth.require_admin()?;
     validate_period(&query)?;
     let filters = ReportFilters::from(&query);
-    let report = reports::report(&state, &report_type, &filters).await?;
+    let mut report = reports::report(&state, &report_type, &filters).await?;
+    let settings = super::settings::get_or_create(&state).await?;
+    if let Some(meta) = report.get_mut("meta").and_then(Value::as_object_mut) {
+        meta.insert("clinic".into(), resources::setting_value(&settings));
+    }
     let format = query.format.as_deref().unwrap_or("");
     let exported = crate::api::exports::export(&report_type, format, &report)?;
     let disposition = format!(

@@ -1,11 +1,11 @@
 <template>
-  <div class="statement-shell">
+  <div class="statement-shell" dir="rtl">
     <v-skeleton-loader v-if="loading" class="print-loading" type="article, table" />
     <InlineError v-else-if="error" :message="error" />
     <article v-else-if="patient" class="statement-document">
       <header class="statement-header">
         <div class="statement-brand">
-          <ClinicLogo v-if="settings.show_logo" :size="52" />
+          <ClinicLogo v-if="settings.show_logo" :size="68" />
           <div>
             <h1>{{ settings.clinic_name }}</h1>
             <p>{{ settings.clinic_subtitle }}</p>
@@ -13,20 +13,20 @@
         </div>
         <div class="statement-title">
           <h2>كشف حساب مريض</h2>
-          <span>أُعد في {{ generatedAt }}</span>
+          <span>أُعد في <bdi dir="auto">{{ generatedAt }}</bdi></span>
         </div>
       </header>
 
       <div class="brand-rule"></div>
 
-      <section class="patient-meta">
+      <section class="patient-meta" aria-label="بيانات المريض">
         <div>
           <span>المريض</span>
           <strong>{{ patient.name }}</strong>
         </div>
         <div>
           <span>الهاتف</span>
-          <strong class="ltr-value">{{ patient.phone }}</strong>
+          <strong><bdi class="phone-value" dir="ltr">{{ patient.phone || '—' }}</bdi></strong>
         </div>
         <div>
           <span>الجهة الراعية</span>
@@ -34,7 +34,7 @@
         </div>
       </section>
 
-      <section class="balance-strip">
+      <section class="balance-strip" aria-label="ملخص الأرصدة">
         <div>
           <span>الرصيد المدفوع مسبقًا</span>
           <MoneyText :value="patient.wallet_balance" />
@@ -47,52 +47,70 @@
 
       <section class="statement-section debts-section">
         <h3>الديون</h3>
-        <p v-if="!patient.debts.length" class="empty-line">لا توجد ديون قائمة</p>
-        <div v-else class="compact-table debts-table">
-          <div class="table-head">
-            <span>المرجع</span>
-            <span>النوع</span>
-            <span>الأصل</span>
-            <span>المسدد</span>
-            <span>المتبقي</span>
-            <span>الحالة</span>
-          </div>
-          <div v-for="debt in patient.debts" :key="debt.id" class="table-row">
-            <span>#{{ debt.id }}</span>
-            <span>{{ labelFor('debtKind', debt.kind) }}</span>
-            <MoneyText :value="debt.amount" />
-            <MoneyText :value="debt.paid_amount" />
-            <MoneyText :value="debt.remaining" />
-            <span>{{ labelFor('debtStatus', debt.status) }}</span>
-          </div>
+        <div class="section-rule"></div>
+        <div class="table-wrap">
+          <table class="statement-table debts-table">
+            <thead>
+              <tr>
+                <th>المرجع</th>
+                <th>النوع</th>
+                <th>الأصل</th>
+                <th>المسدد</th>
+                <th>المتبقي</th>
+                <th>الحالة</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="debt in patient.debts" :key="debt.id">
+                <td><bdi dir="ltr">#{{ debt.id }}</bdi></td>
+                <td>{{ labelFor('debtKind', debt.kind) }}</td>
+                <td><MoneyText :value="debt.amount" /></td>
+                <td><MoneyText :value="debt.paid_amount" /></td>
+                <td><MoneyText :value="debt.remaining" /></td>
+                <td>{{ labelFor('debtStatus', debt.status) }}</td>
+              </tr>
+              <tr v-if="!patient.debts.length">
+                <td colspan="6" class="empty-line">لا توجد ديون قائمة</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </section>
 
       <section class="statement-section payments-section">
         <h3>المدفوعات والاسترجاعات</h3>
-        <p v-if="!sortedPayments.length" class="empty-line">لا توجد حركات مالية خلال الفترة</p>
-        <div v-else class="compact-table payments-table">
-          <div class="table-head">
-            <span>التاريخ</span>
-            <span>النوع</span>
-            <span>المريض</span>
-            <span>الطريقة</span>
-            <span>المبلغ</span>
-          </div>
-          <div v-for="payment in sortedPayments" :key="payment.id" class="table-row">
-            <span class="payment-date">
-              <strong>{{ formatPaymentDate(payment.created_at) }}</strong>
-              <small>{{ formatPaymentTime(payment.created_at) }}</small>
-            </span>
-            <span>{{ labelFor('paymentType', payment.type) }}</span>
-            <span>{{ patient.name }}</span>
-            <span>{{ labelFor('paymentMethod', payment.method) }}</span>
-            <MoneyText :value="payment.amount" />
-          </div>
+        <div class="section-rule"></div>
+        <div class="table-wrap">
+          <table class="statement-table payments-table">
+            <thead>
+              <tr>
+                <th>التاريخ</th>
+                <th>النوع</th>
+                <th>المريض</th>
+                <th>طريقة الدفع</th>
+                <th>المبلغ</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="payment in sortedPayments" :key="payment.id">
+                <td class="payment-date">
+                  <strong>{{ formatPaymentDate(payment.created_at) }}</strong>
+                  <small>{{ formatPaymentTime(payment.created_at) }}</small>
+                </td>
+                <td>{{ labelFor('paymentType', payment.type) }}</td>
+                <td>{{ patient.name }}</td>
+                <td>{{ labelFor('paymentMethod', payment.method) }}</td>
+                <td class="payment-amount"><MoneyText :value="payment.amount" /></td>
+              </tr>
+              <tr v-if="!sortedPayments.length">
+                <td colspan="5" class="empty-line">لا توجد حركات مالية خلال الفترة</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </section>
 
-      <section class="statement-totals">
+      <section class="statement-totals" aria-label="ملخص المدفوعات">
         <div>
           <span>المقبوضات</span>
           <MoneyText :value="receiptsTotal" />
@@ -110,9 +128,9 @@
       <footer class="paper-footer">
         <div class="footer-contact">
           <span>{{ settings.address || '—' }}</span>
-          <strong class="ltr-value">{{ settings.phone || '—' }}</strong>
+          <strong><bdi class="phone-value" dir="ltr">{{ settings.phone || '—' }}</bdi></strong>
         </div>
-        <p>{{ settings.receipt_footer }}</p>
+        <p>{{ settings.receipt_footer || 'نتمنى لكم دوام الصحة والعافية' }}</p>
       </footer>
     </article>
   </div>
@@ -204,36 +222,41 @@ const formatPaymentTime = (value) => new Intl.DateTimeFormat('en-GB', {
 .statement-shell {
   display: grid;
   place-items: start center;
+  direction: rtl;
 }
 
 .print-loading,
 .statement-document {
-  width: min(100%, 105mm);
+  width: min(100%, 210mm);
 }
 
 .statement-document {
-  min-height: 148mm;
+  min-height: 297mm;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 5mm 5.5mm 4mm;
+  gap: 14px;
+  padding: 14mm 13mm 10mm;
   border: 1px solid var(--color-print-border);
   background: var(--color-canvas);
+  box-shadow: 0 4px 24px rgb(20 35 30 / 8%);
   color: var(--color-ink);
-  font-size: 9px;
+  font-size: 11px;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
 }
 
 .statement-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 24px;
 }
 
 .statement-brand {
+  min-width: 0;
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 12px;
 }
 
 .statement-brand h1,
@@ -244,8 +267,8 @@ const formatPaymentTime = (value) => new Intl.DateTimeFormat('en-GB', {
 
 .statement-brand h1 {
   color: var(--color-print-brand-dark);
-  font-size: 17px;
-  line-height: 1.2;
+  font-size: 26px;
+  line-height: 1.25;
 }
 
 .statement-brand p,
@@ -255,38 +278,42 @@ const formatPaymentTime = (value) => new Intl.DateTimeFormat('en-GB', {
 }
 
 .statement-brand p {
-  font-size: 10px;
+  margin-top: 2px;
+  font-size: 14px;
 }
 
 .statement-title {
+  flex: 0 0 auto;
   text-align: left;
 }
 
 .statement-title h2 {
-  font-size: 16px;
+  font-size: 21px;
 }
 
 .statement-title span {
-  font-size: 8px;
+  font-size: 10px;
 }
 
-.brand-rule {
+.brand-rule,
+.section-rule {
   height: 2px;
   background: var(--color-print-brand);
 }
 
 .patient-meta {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: 1.2fr .8fr 1fr;
+  border: 1px solid var(--color-print-border);
 }
 
 .patient-meta > div {
-  padding: 5px 8px;
-  text-align: center;
+  min-width: 0;
+  padding: 11px 13px;
 }
 
 .patient-meta > div + div {
-  border-right: 1px solid var(--color-print-border);
+  border-inline-start: 1px solid var(--color-print-border);
 }
 
 .patient-meta span,
@@ -298,85 +325,127 @@ const formatPaymentTime = (value) => new Intl.DateTimeFormat('en-GB', {
 .patient-meta span,
 .balance-strip span {
   color: var(--color-print-muted);
+  font-size: 10px;
   font-weight: 600;
 }
 
 .patient-meta strong {
-  margin-top: 2px;
-  font-size: 10px;
+  margin-top: 3px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
 }
 
 .balance-strip {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  border: 1px solid var(--color-print-border);
   background: var(--color-print-tint);
 }
 
 .balance-strip > div {
-  padding: 7px 10px;
+  min-width: 0;
+  padding: 11px 13px;
 }
 
 .balance-strip > div + div {
-  border-right: 1px solid var(--color-print-border);
+  border-inline-start: 1px solid var(--color-print-border);
 }
 
 .balance-strip :deep(.money-text) {
   display: block;
-  margin-top: 2px;
+  margin-top: 3px;
   color: var(--color-ink);
-  font-size: 16px;
-  font-weight: 600;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.statement-section {
+  margin-top: 4px;
 }
 
 .statement-section h3 {
-  margin: 0 0 5px;
-  padding-bottom: 2px;
-  border-bottom: 2px solid var(--color-print-brand);
-  font-size: 14px;
+  margin: 0;
+  font-size: 17px;
 }
 
-.empty-line {
-  margin: 10px 0;
-  color: var(--color-print-muted);
+.section-rule {
+  margin: 4px 0 8px;
+}
+
+.table-wrap {
+  overflow: hidden;
+  border: 1px solid var(--color-print-border);
+}
+
+.statement-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.statement-table thead {
+  background: var(--color-print-brand);
+  color: var(--color-canvas);
+}
+
+.statement-table th {
+  padding: 8px 6px;
+  border-inline-start: 1px solid rgb(255 255 255 / 28%);
+  font-size: 10px;
+  font-weight: 700;
   text-align: center;
 }
 
-.compact-table {
-  display: grid;
+.statement-table th:first-child {
+  border-inline-start: 0;
 }
 
-.table-head,
-.table-row {
-  display: grid;
-  align-items: center;
-  gap: 5px;
-}
-
-.table-head {
-  padding: 4px 5px;
-  background: var(--color-print-brand);
-  color: var(--color-canvas);
-  font-weight: 600;
-}
-
-.table-row {
-  padding: 4px 5px;
+.statement-table td {
+  padding: 9px 6px;
   border-bottom: 1px solid var(--color-print-border);
+  font-size: 10px;
+  line-height: 1.5;
+  text-align: center;
+  vertical-align: middle;
+  overflow-wrap: anywhere;
 }
 
-.table-row :deep(.money-text) {
+.statement-table td + td {
+  border-inline-start: 1px solid var(--color-print-border);
+}
+
+.statement-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.statement-table :deep(.money-text) {
+  display: inline-block;
   color: inherit;
   font-size: inherit;
 }
 
-.debts-table .table-head,
-.debts-table .table-row {
-  grid-template-columns: 38px 52px repeat(3, minmax(48px, 1fr)) 42px;
+.debts-table th {
+  width: 16.666%;
 }
 
-.payments-table .table-head,
-.payments-table .table-row {
-  grid-template-columns: 55px 64px minmax(80px, 1fr) 46px 58px;
+.payments-table th:nth-child(1) {
+  width: 17%;
+}
+
+.payments-table th:nth-child(2) {
+  width: 16%;
+}
+
+.payments-table th:nth-child(3) {
+  width: 27%;
+}
+
+.payments-table th:nth-child(4) {
+  width: 17%;
+}
+
+.payments-table th:nth-child(5) {
+  width: 23%;
 }
 
 .payment-date strong,
@@ -386,72 +455,168 @@ const formatPaymentTime = (value) => new Intl.DateTimeFormat('en-GB', {
   text-align: center;
 }
 
+.payment-date strong {
+  font-size: 10px;
+}
+
 .payment-date small {
+  margin-top: 2px;
   color: var(--color-print-muted);
+  font-size: 9px;
+}
+
+.payment-amount {
+  text-align: left !important;
+}
+
+.payment-amount :deep(.money-text) {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.empty-line {
+  padding: 18px 8px !important;
+  color: var(--color-print-muted);
+  font-weight: 500;
+  text-align: center;
 }
 
 .statement-totals {
-  width: 48%;
-  margin-top: auto;
-  margin-right: auto;
+  width: 270px;
+  max-width: 100%;
+  align-self: flex-start;
+  border: 1px solid var(--color-print-border);
 }
 
 .statement-totals > div {
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 2px 6px;
-  border-bottom: 1px solid var(--color-print-border);
+  gap: 14px;
+  padding: 7px 11px;
+}
+
+.statement-totals > div + div {
+  border-top: 1px solid var(--color-print-border);
+}
+
+.statement-totals :deep(.money-text) {
+  color: inherit;
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .statement-totals .net-total {
   background: var(--color-print-tint);
+  border-top: 1px solid var(--color-print-brand);
   color: var(--color-print-brand-dark);
-  font-size: 11px;
 }
 
+.net-total strong,
 .net-total :deep(.money-text) {
-  color: var(--color-ink);
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .paper-footer {
-  padding-top: 5px;
+  margin-top: auto;
+  padding-top: 10px;
   border-top: 1px solid var(--color-print-border);
   color: var(--color-print-muted);
-  font-size: 7px;
+  font-size: 9px;
   text-align: center;
 }
 
 .footer-contact {
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 18px;
+}
+
+.footer-contact strong {
+  color: var(--color-ink);
 }
 
 .paper-footer p {
-  margin: 4px 0 0;
-  font-size: 8px;
+  margin: 7px 0 0;
+  font-size: 11px;
   font-weight: 600;
 }
 
-@media (max-width: 520px) {
+@media (max-width: 760px) {
   .statement-document {
     min-height: auto;
-    padding: 18px 14px;
+    padding: 24px 18px;
+  }
+
+  .statement-header {
+    align-items: flex-start;
+  }
+
+  .statement-brand h1 {
+    font-size: 20px;
+  }
+
+  .statement-title h2 {
+    font-size: 17px;
+  }
+}
+
+@media (max-width: 560px) {
+  .statement-header,
+  .footer-contact {
+    flex-direction: column;
+  }
+
+  .statement-title {
+    text-align: right;
+  }
+
+  .patient-meta {
+    grid-template-columns: 1fr;
+  }
+
+  .patient-meta > div + div {
+    border-inline-start: 0;
+    border-top: 1px solid var(--color-print-border);
+  }
+
+  .statement-table th,
+  .statement-table td {
+    padding-inline: 3px;
+    font-size: 9px;
   }
 }
 
 @media print {
   @page {
-    size: A6 portrait;
+    size: A4 portrait;
     margin: 0;
   }
 
   .statement-document {
-    width: 105mm;
-    min-height: 148mm;
+    width: 210mm;
+    min-height: 297mm;
+    padding: 12mm 11mm 9mm;
     border: 0;
+    box-shadow: none;
+  }
+
+  .statement-header,
+  .patient-meta,
+  .balance-strip,
+  .statement-totals,
+  .paper-footer {
+    break-inside: avoid;
+  }
+
+  .statement-table thead {
+    display: table-header-group;
+  }
+
+  .statement-table tr {
+    break-inside: avoid;
   }
 }
 </style>

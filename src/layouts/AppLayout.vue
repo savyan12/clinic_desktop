@@ -77,7 +77,7 @@
       </header>
       <div class="route-stage">
         <router-view v-slot="{ Component, route: viewRoute }">
-          <div :key="viewRoute.path" class="route-page">
+          <div :key="viewRoute.path" class="route-page" data-form-flow-page>
             <component :is="Component" />
           </div>
         </router-view>

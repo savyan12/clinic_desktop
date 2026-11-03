@@ -1,7 +1,7 @@
 <template>
   <div class="page-container page-stack">
     <PageHeader title="المرضى" subtitle="البحث في السجلات والوصول إلى الملف الموحد" action-label="إضافة مريض" action-icon="mdi-account-plus-outline" @action="patientDialog = true" />
-    <div class="patient-toolbar surface-card">
+    <div class="patient-toolbar surface-card" data-form-flow-filter>
       <v-text-field v-model="filters.search" label="بحث بالاسم أو رقم الهاتف" prepend-inner-icon="mdi-magnify" clearable @update:model-value="searchChanged" />
       <v-select v-model="filters.subscription_status" label="حالة الاشتراك" :items="subscriptionFilters" clearable @update:model-value="filterChanged" />
     </div>
@@ -9,7 +9,7 @@
       <template #rows="{ items }">
         <tr v-for="patient in items" :key="patient.id" class="clickable-row" @click="router.push(`/patients/${patient.id}`)">
           <td><strong>{{ patient.name }}</strong></td>
-          <td><span class="ltr-value">{{ patient.phone }}</span></td>
+          <td><span class="phone-value">{{ patient.phone }}</span></td>
           <td>{{ labelFor('gender', patient.gender) }}</td>
           <td>{{ patient.area || '—' }}</td>
           <td><StatusChip v-if="patient.subscription_status" type="subscription" :value="patient.subscription_status" /><span v-else class="muted-text">لا يوجد</span></td>

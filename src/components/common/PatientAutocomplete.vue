@@ -18,14 +18,15 @@
       @update:focused="loadOnFocus"
     >
       <template #item="{ props: itemProps, item }">
-        <v-list-item v-bind="itemProps" :subtitle="item.raw.phone">
+        <v-list-item v-bind="itemProps">
+          <template #subtitle><span class="phone-value">{{ item.raw.phone }}</span></template>
           <template #append><span class="caption-text">{{ item.raw.area }}</span></template>
         </v-list-item>
       </template>
     </v-autocomplete>
     <InlineError v-if="loadError" :message="loadError" retry @retry="loadPatients" />
     <div v-if="showSummary && selected" class="patient-summary">
-      <div><span>الهاتف</span><strong class="ltr-value">{{ selected.phone }}</strong></div>
+      <div><span>الهاتف</span><strong class="phone-value">{{ selected.phone }}</strong></div>
       <div><span>الرصيد</span><MoneyText :value="selected.wallet_balance" /></div>
       <div><span>الديون</span><MoneyText :value="selected.debt_total" /></div>
       <div><span>الجهة الراعية</span><strong>{{ selected.sponsor?.name || 'لا توجد' }}</strong></div>

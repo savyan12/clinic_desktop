@@ -55,6 +55,17 @@ async function check(name, run) {
 }
 
 try {
+  const {
+    auditActionLabel,
+    auditEntityLabel,
+    buildAuditChanges,
+    formatAuditValue,
+  } = await server.ssrLoadModule('/src/constants/audit.js')
+  const {
+    getReportDefinition,
+    reportCellLabel,
+    reportSummaryItems,
+  } = await server.ssrLoadModule('/src/constants/reports.js')
   const { cachedLookup, invalidateLookupAfter } = await server.ssrLoadModule('/src/api/lookupCache.js')
   const { useDialogOptions } = await server.ssrLoadModule('/src/composables/useDialogOptions.js')
   const { default: http } = await server.ssrLoadModule('/src/api/client.js')
@@ -67,6 +78,91 @@ try {
     calls.push(config)
     return { config, data: await handle(config), status: 200, statusText: 'OK', headers: {} }
   }
+
+  await check('Audit actions used by both backends have centralized Arabic labels', async () => {
+    const actionKeys = [
+      'debt_payment_recorded', 'debt_settled', 'doctor_created', 'doctor_paid',
+      'doctor_payout_created', 'doctor_rate_changed',
+      'doctor_updated', 'opening_debt_created', 'patient_created', 'patient_updated',
+      'payment_recorded', 'payment_refunded', 'service_created', 'service_price_changed',
+      'service_updated', 'session_cancelled', 'session_closed', 'session_corrected',
+      'session_created', 'session_services_added', 'session_updated', 'settings_updated',
+      'sponsor_created', 'sponsor_updated', 'subscription_cancelled', 'subscription_corrected',
+      'subscription_created', 'subscription_reactivated', 'subscription_stopped', 'user_created',
+      'user_password_reset', 'user_updated', 'wallet_topped_up', 'wallet_topup_refunded',
+    ]
+    actionKeys.forEach((key) => {
+      const label = auditActionLabel(key)
+      assert.match(label, /[\u0600-\u06ff]/)
+      assert.equal(label.includes('_'), false)
+    })
+    assert.equal(auditActionLabel('invoice_created'), 'إنشاء سجل')
+    assert.equal(auditActionLabel('unmapped_operation'), 'عملية أخرى')
+    assert.equal(auditEntityLabel('unmapped_entity'), 'سجل')
+  })
+
+  await check('Audit comparison includes changed fields only and localizes their values', async () => {
+    const changes = buildAuditChanges({
+      action: 'service_updated',
+      old_values: { name: 'علاج طبيعي', price: '10.000', is_active: true, status: 'open' },
+      new_values: { name: 'علاج طبيعي', price: '12.500', is_active: false, status: 'closed' },
+    })
+    assert.equal(changes.showOld, true)
+    assert.equal(changes.showNew, true)
+    assert.deepEqual(changes.rows.map((row) => row.key), ['price', 'is_active', 'status'])
+    assert.equal(changes.rows[0].oldValue, '10 د.ل')
+    assert.equal(changes.rows[0].newValue, '12.5 د.ل')
+    assert.equal(changes.rows[1].oldValue, 'نعم')
+    assert.equal(changes.rows[1].newValue, 'لا')
+    assert.equal(changes.rows[2].newValue, 'مغلقة')
+  })
+
+  await check('Audit comparison adapts creation, deletion, and nested services without JSON', async () => {
+    const created = buildAuditChanges({ new_values: { name: 'مريض جديد', gender: 'male' } })
+    assert.equal(created.showOld, false)
+    assert.equal(created.showNew, true)
+    assert.equal(created.rows[1].newValue, 'ذكر')
+
+    const deleted = buildAuditChanges({ old_values: { name: 'خدمة قديمة' }, new_values: null })
+    assert.equal(deleted.showOld, true)
+    assert.equal(deleted.showNew, false)
+
+    const nested = buildAuditChanges({
+      old_values: { services: [{ service_id: 1, name: 'جلسة', price: '20.000' }] },
+      new_values: { services: [{ service_id: 1, name: 'جلسة', price: '25.000' }] },
+    })
+    assert.deepEqual(nested.rows.map((row) => row.key), ['services.0.price'])
+    assert.match(nested.rows[0].label, /الخدمات.*البند 1.*السعر/)
+    const renderedValues = `${nested.rows[0].oldValue}${nested.rows[0].newValue}`
+    assert.equal(['{', '}', '[', ']', '"'].some((character) => renderedValues.includes(character)), false)
+    assert.equal(formatAuditValue('', 'note'), '—')
+    assert.equal(formatAuditValue('unexpected', 'status'), 'قيمة أخرى')
+    assert.equal(formatAuditValue('open', 'status', 'debt'), 'مفتوح')
+  })
+
+  await check('Report screens and print views share the required Arabic columns and formatters', async () => {
+    const expectedColumns = {
+      sessions: ['التاريخ', 'المريض', 'الطبيب', 'الخدمات', 'القيمة', 'الحالة'],
+      collections: ['التاريخ', 'النوع', 'المريض', 'الطريقة', 'المبلغ'],
+      debts: ['المرجع', 'المريض', 'المسؤول', 'الأصل', 'المسدد', 'المتبقي', 'الحالة'],
+      'doctor-dues': ['الطبيب', 'الجلسات', 'المكتسب', 'المصروف', 'المتبقي'],
+      subscriptions: ['المريض', 'النوع', 'البداية', 'النهاية', 'المتبقي', 'القيمة', 'الحالة'],
+    }
+    Object.entries(expectedColumns).forEach(([type, labels]) => {
+      assert.deepEqual(getReportDefinition(type).columns.map((column) => column.label), labels)
+    })
+
+    const subscription = getReportDefinition('subscriptions')
+    const row = { plan_type: 'monthly', remaining_days: 8, end_date: '2026-11-30' }
+    assert.equal(reportCellLabel(subscription.columns[1], row), 'شهري')
+    assert.equal(reportCellLabel(subscription.columns[4], row), '8 يوم')
+    assert.match(reportCellLabel(subscription.columns[3], row), /2026/)
+    assert.deepEqual(
+      reportSummaryItems('collections', { received: '80.000', refunds: '5.000', net: '75.000' })
+        .map(({ label, money }) => [label, money]),
+      [['إجمالي المقبوضات', true], ['إجمالي الاسترجاعات', true], ['صافي المقبوضات', true]],
+    )
+  })
 
   await check('Concurrent option requests share one fetch', async () => {
     let fetches = 0

@@ -3,6 +3,7 @@ export const labels = {
   sessionStatus: { open: 'مفتوحة', closed: 'مغلقة', cancelled: 'ملغاة' },
   sessionType: { individual: 'فردية', subscription: 'اشتراك' },
   subscriptionStatus: { active: 'نشط', completed: 'مكتمل', stopped: 'موقوف', cancelled: 'ملغي' },
+  subscriptionPlan: { monthly: 'شهري', legacy_package: 'حزمة جلسات' },
   debtStatus: { open: 'مفتوح', partial: 'جزئي', paid: 'مسدد', void: 'ملغى' },
   debtKind: { session: 'جلسة', subscription: 'اشتراك', opening: 'افتتاحي' },
   paymentType: {
@@ -24,19 +25,6 @@ export const labels = {
   },
   gender: { male: 'ذكر', female: 'أنثى' },
   active: { true: 'نشط', false: 'معطل' },
-  auditAction: {
-    session_created: 'إنشاء جلسة',
-    session_closed: 'إغلاق جلسة',
-    session_cancelled: 'إلغاء جلسة',
-    patient_created: 'إضافة مريض',
-    subscription_created: 'إنشاء اشتراك',
-    subscription_cancelled: 'إلغاء اشتراك',
-    wallet_topped_up: 'شحن رصيد',
-    debt_settled: 'تسوية دين',
-    doctor_paid: 'صرف مستحقات طبيب',
-    service_updated: 'تعديل خدمة',
-    user_updated: 'تعديل مستخدم',
-  },
 }
 
 export function labelFor(group, value) {

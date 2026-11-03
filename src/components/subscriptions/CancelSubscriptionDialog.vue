@@ -31,7 +31,7 @@
       </v-card-text>
       <v-card-actions class="dialog-actions">
         <v-btn variant="text" :disabled="saving" @click="close">تراجع</v-btn>
-        <v-btn color="error" :loading="saving" :disabled="saving || loadingPreview || !preview || Boolean(error)" @click="submit">تأكيد إلغاء الاشتراك</v-btn>
+        <v-btn color="error" data-form-flow-primary :loading="saving" :disabled="saving || loadingPreview || !preview || Boolean(error)" @click="submit">تأكيد إلغاء الاشتراك</v-btn>
       </v-card-actions>
     </v-card>
   </v-dialog>

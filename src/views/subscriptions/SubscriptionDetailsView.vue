@@ -25,7 +25,8 @@
         <div class="usage-main">
           <div class="section-row"><span>{{ formatDate(subscription.start_date) }}</span><span>{{ formatDate(subscription.end_date) }}</span></div>
           <div class="usage-track"><span :style="{ width: durationPercent + '%' }"></span></div>
-          <p>لا يوجد حد لعدد الجلسات؛ تُختار الخدمات الفعلية داخل كل جلسة خلال هذه المدة.</p>
+          <div class="schedule-chips"><v-chip v-for="day in scheduledDayLabels" :key="day" size="small" color="primary" variant="tonal">{{ day }}</v-chip></div>
+          <p>يغطي الاشتراك جلسة واحدة في كل يوم حضور محدد، وتُختار الخدمات الفعلية داخل الجلسة.</p>
         </div>
       </section>
 
@@ -40,6 +41,7 @@
 
       <section class="detail-grid">
         <div class="detail-item"><span class="detail-label">نوع الاشتراك</span><strong>{{ isMonthly ? 'اشتراك شهري' : 'باقة قديمة محفوظة' }}</strong></div>
+        <div v-if="isMonthly" class="detail-item"><span class="detail-label">أيام الحضور</span><strong>{{ scheduleLabel }}</strong></div>
         <div class="detail-item"><span class="detail-label">القيمة</span><MoneyText :value="subscription.net_total" /></div>
         <div class="detail-item"><span class="detail-label">المدفوع</span><MoneyText :value="subscription.paid_amount" /></div>
         <div v-if="subscription.status !== 'cancelled'" class="detail-item"><span class="detail-label">المتبقي المالي</span><MoneyText :value="subscription.remaining_amount" /></div>
@@ -83,10 +85,16 @@
         <InlineError v-if="correctionError" :message="correctionError" />
         <InlineError v-if="optionsError" :message="optionsError" retry @retry="loadOptions" />
         <v-text-field v-model="correction.end_date" :label="isMonthly ? 'تاريخ النهاية' : 'تاريخ النهاية المتوقع'" type="date" />
+        <div v-if="isMonthly" class="correction-schedule">
+          <span>أيام الحضور</span>
+          <v-btn-toggle v-model="correction.scheduled_weekdays" multiple divided color="primary" variant="outlined" class="weekday-toggle" aria-label="تصحيح أيام حضور الاشتراك">
+            <v-btn v-for="day in SUBSCRIPTION_WEEKDAYS" :key="day.value" :value="day.value">{{ day.title }}</v-btn>
+          </v-btn-toggle>
+        </div>
         <v-select v-model="correction.sponsor_id" label="الجهة الراعية" :items="sponsors" item-title="name" item-value="id" clearable :loading="loadingOptions" :disabled="!canCorrectSponsor || loadingOptions || Boolean(optionsError)" :hint="canCorrectSponsor ? 'يمكن التصحيح قبل إنشاء دين على الاشتراك.' : 'لا يمكن تغيير الجهة بعد إنشاء دين.'" persistent-hint />
         <v-textarea v-model="correction.reason" label="سبب التصحيح" rows="3" />
       </v-card-text>
-      <v-card-actions class="dialog-actions"><v-btn variant="text" :disabled="correcting" @click="correctionDialog = false">تراجع</v-btn><v-btn color="primary" :loading="correcting" @click="applyCorrection">تأكيد التصحيح</v-btn></v-card-actions>
+      <v-card-actions class="dialog-actions"><v-btn variant="text" :disabled="correcting" @click="correctionDialog = false">تراجع</v-btn><v-btn color="primary" data-form-flow-primary :loading="correcting" @click="applyCorrection">تأكيد التصحيح</v-btn></v-card-actions>
     </v-card>
   </v-dialog>
 </template>
@@ -107,6 +115,7 @@ import CancelSubscriptionDialog from '@/components/subscriptions/CancelSubscript
 import { useIdempotency } from '@/composables/useIdempotency'
 import { usePermissions } from '@/composables/usePermissions'
 import { useUiStore } from '@/stores/ui'
+import { formatSubscriptionSchedule, normalizeSubscriptionWeekdays, SUBSCRIPTION_WEEKDAYS } from '@/constants/subscriptions'
 
 const route = useRoute()
 const ui = useUiStore()
@@ -121,7 +130,7 @@ const { data: sponsorOptions, loading: loadingOptions, error: optionsError, load
 const sponsors = computed(() => (sponsorOptions.value || []).filter((item) => item.is_active))
 const correctionError = ref('')
 const correcting = ref(false)
-const correction = reactive({ end_date: '', sponsor_id: null, reason: '' })
+const correction = reactive({ end_date: '', sponsor_id: null, scheduled_weekdays: [], reason: '' })
 const confirm = reactive({ open: false, action: '', title: '', message: '', label: '', requireReason: false, loading: false })
 const isMonthly = computed(() => subscription.value?.plan_type === 'monthly')
 const legacyUsagePercent = computed(() => subscription.value?.sessions_count ? Math.min(100, (subscription.value.sessions_used / subscription.value.sessions_count) * 100) : 0)
@@ -133,13 +142,17 @@ const durationPercent = computed(() => {
   const total = Math.max(1, end - start)
   return Math.max(0, Math.min(100, ((today - start) / total) * 100))
 })
+const scheduledDayLabels = computed(() => normalizeSubscriptionWeekdays(subscription.value?.scheduled_weekdays)
+  .map((value) => SUBSCRIPTION_WEEKDAYS.find((day) => day.value === value)?.title)
+  .filter(Boolean))
+const scheduleLabel = computed(() => formatSubscriptionSchedule(subscription.value?.scheduled_weekdays))
 const canCorrectSponsor = computed(() => !subscription.value?.debts?.length)
 const canCancel = computed(() => ['active', 'stopped'].includes(subscription.value?.status) && (isMonthly.value || subscription.value?.remaining > 0))
 const subscriptionSubtitle = computed(() => isMonthly.value
   ? 'من ' + formatDate(subscription.value.start_date) + ' إلى ' + formatDate(subscription.value.end_date)
   : 'بدأ في ' + formatDate(subscription.value.start_date) + ' · النهاية المتوقعة ' + formatDate(subscription.value.expected_end_date))
 const statusDescription = computed(() => {
-  if (subscription.value.status === 'active') return isMonthly.value ? 'الاشتراك صالح خلال المدة المحددة دون حد لعدد الجلسات.' : 'الاشتراك صالح ما دام يحتوي على جلسات متبقية.'
+  if (subscription.value.status === 'active') return isMonthly.value ? 'الاشتراك صالح في أيام الحضور المحددة خلال مدته.' : 'الاشتراك صالح ما دام يحتوي على جلسات متبقية.'
   if (subscription.value.status === 'completed') return isMonthly.value ? 'انتهت مدة الاشتراك.' : 'اكتمل الاشتراك باستهلاك جميع الجلسات.'
   if (subscription.value.status === 'stopped') return 'الاشتراك موقوف يدويًا ولا يمكن استخدامه حتى إعادة التفعيل.'
   return 'أُلغي الاشتراك نهائيًا.'
@@ -177,14 +190,21 @@ async function executeAction(reason) {
 async function cancelled() { ui.showSnackbar('تم إلغاء الاشتراك وتسوية الاسترجاع أو الدين حسب المدة المستهلكة.'); await load() }
 function openCorrection() {
   reset()
-  Object.assign(correction, { end_date: isMonthly.value ? subscription.value.end_date : (subscription.value.expected_end_date || ''), sponsor_id: subscription.value.sponsor_id || null, reason: '' })
+  Object.assign(correction, { end_date: isMonthly.value ? subscription.value.end_date : (subscription.value.expected_end_date || ''), sponsor_id: subscription.value.sponsor_id || null, scheduled_weekdays: normalizeSubscriptionWeekdays(subscription.value.scheduled_weekdays), reason: '' })
   correctionError.value = ''
   correctionDialog.value = true
 }
 async function applyCorrection() {
   correcting.value = true
+  correctionError.value = ''
+  if (isMonthly.value && !normalizeSubscriptionWeekdays(correction.scheduled_weekdays).length) {
+    correctionError.value = 'اختر يوم حضور واحدًا على الأقل.'
+    correcting.value = false
+    return
+  }
   try {
     const changes = { [isMonthly.value ? 'end_date' : 'expected_end_date']: correction.end_date || null }
+    if (isMonthly.value) changes.scheduled_weekdays = normalizeSubscriptionWeekdays(correction.scheduled_weekdays)
     if (canCorrectSponsor.value) changes.sponsor_id = correction.sponsor_id || null
     await correctSubscription(subscription.value.id, { changes, reason: correction.reason }, key.value)
     ui.showSnackbar('تم تصحيح الاشتراك وتوثيق السبب.')
@@ -202,7 +222,8 @@ const formatDateTime = (value) => new Intl.DateTimeFormat('ar-LY-u-nu-latn', { d
 
 <style scoped>
 .subscription-status-banner { display: flex; align-items: center; gap: 12px; padding: 16px 20px; border: 1px solid var(--color-hairline); border-radius: 14px; background: var(--color-pearl); }.usage-overview { display: grid; grid-template-columns: 180px 1fr; align-items: center; gap: 28px; }.usage-number { text-align: center; }.usage-number strong, .usage-number span { display: block; }.usage-number strong { font-size: 56px; line-height: 1; color: var(--color-primary); }.usage-number span { margin-top: 8px; color: var(--color-ink-muted); }.usage-main { display: grid; gap: 14px; }.usage-main p { margin: 0; color: var(--color-ink-muted); }.section-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }.usage-track { height: 12px; overflow: hidden; border-radius: 99px; background: var(--color-parchment); }.usage-track span { display: block; height: 100%; background: var(--color-primary); }.services-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.schedule-chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .two-column { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }.record-list { display: grid; margin-top: 16px; }.record-list > div { min-height: 64px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid var(--color-hairline); }.record-list > div:first-child { border-top: 0; }.record-list strong, .record-list span { display: block; }.record-list strong { font-weight: 600; }.record-list span { color: var(--color-ink-muted); font-size: 13px; }
-.dialog-title { padding: 24px 24px 4px; font-size: var(--font-section-size); font-weight: 600; }.correction-body { display: grid; gap: 16px; padding: 12px 24px !important; }.correction-body p { margin: 0; color: var(--color-ink-muted); }.dialog-actions { gap: 8px; justify-content: flex-end; padding: 12px 24px 24px; }
+.dialog-title { padding: 24px 24px 4px; font-size: var(--font-section-size); font-weight: 600; }.correction-body { display: grid; gap: 16px; padding: 12px 24px !important; }.correction-body p { margin: 0; color: var(--color-ink-muted); }.correction-schedule { display: grid; gap: 8px; }.correction-schedule > span { color: var(--color-ink-muted); font-size: 13px; }.weekday-toggle { width: fit-content; max-width: 100%; flex-wrap: wrap; }.dialog-actions { gap: 8px; justify-content: flex-end; padding: 12px 24px 24px; }
 @media (max-width: 800px) { .two-column { grid-template-columns: 1fr; }.usage-overview { grid-template-columns: 1fr; } }
 </style>

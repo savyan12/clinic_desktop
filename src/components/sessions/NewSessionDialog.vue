@@ -36,6 +36,7 @@
                     <strong>{{ subscriptionValidity(subscription) }}</strong>
                   </div>
                 </div>
+                <div v-if="unavailableMonthlySubscriptions.length" class="subscription-day-warning"><v-icon icon="mdi-calendar-alert-outline" /><span>يوجد اشتراك شهري غير متاح اليوم لأن اليوم خارج المدة أو ليس من أيام الحضور المحددة.</span></div>
               </div>
             </section>
           </v-window-item>
@@ -117,8 +118,8 @@
         <v-btn variant="text" :disabled="step === 1 || saving" @click="step--">السابق</v-btn>
         <v-spacer />
         <v-btn variant="text" :disabled="saving" @click="close">إلغاء</v-btn>
-        <v-btn v-if="step < 3" color="primary" :loading="step === 1 ? loadingPatient : loadingOptions" :disabled="step === 1 ? Boolean(patientError) : Boolean(optionsError)" @click="next">التالي</v-btn>
-        <v-btn v-else color="primary" prepend-icon="mdi-check-circle-outline" :loading="saving" :disabled="walletInsufficient" @click="save">تسجيل وإغلاق الجلسة</v-btn>
+        <v-btn v-if="step < 3" color="primary" data-form-flow-primary :loading="step === 1 ? loadingPatient : loadingOptions" :disabled="step === 1 ? Boolean(patientError) : Boolean(optionsError)" @click="next">التالي</v-btn>
+        <v-btn v-else color="primary" prepend-icon="mdi-check-circle-outline" data-form-flow-primary :loading="saving" :disabled="walletInsufficient" @click="save">تسجيل وإغلاق الجلسة</v-btn>
       </v-card-actions>
     </v-card>
   </v-dialog>
@@ -138,6 +139,7 @@ import MoneyText from '@/components/common/MoneyText.vue'
 import PatientAutocomplete from '@/components/common/PatientAutocomplete.vue'
 import StatusChip from '@/components/common/StatusChip.vue'
 import { paymentMethods } from '@/constants/labels'
+import { formatSubscriptionSchedule } from '@/constants/subscriptions'
 import { decimal, formatMoney, numeric } from '@/composables/useMoney'
 import { useIdempotency } from '@/composables/useIdempotency'
 import { useDialogOptions } from '@/composables/useDialogOptions'
@@ -173,6 +175,7 @@ const form = reactive(initialForm())
 const activeDoctors = computed(() => doctors.value.filter((item) => item.is_active))
 const activeServices = computed(() => services.value.filter((item) => item.is_active))
 const activeSubscriptions = computed(() => patientDetails.value?.subscriptions?.filter((item) => item.status === 'active' && item.is_usable !== false && (item.plan_type === 'monthly' || item.remaining > 0)) || [])
+const unavailableMonthlySubscriptions = computed(() => patientDetails.value?.subscriptions?.filter((item) => item.plan_type === 'monthly' && item.status === 'active' && item.is_usable === false) || [])
 const selectedSubscription = computed(() => activeSubscriptions.value.find((item) => item.id === Number(form.subscription_id)) || null)
 const monthlySubscription = computed(() => selectedSubscription.value?.plan_type === 'monthly')
 const canChooseServices = computed(() => form.type === 'individual' || monthlySubscription.value)
@@ -245,8 +248,8 @@ watch(netTotal, (value, previous) => {
 })
 
 function clearErrors() { Object.keys(errors).forEach((name) => delete errors[name]) }
-function subscriptionTitle(item) { return item.plan_type === 'monthly' ? 'اشتراك شهري حتى ' + formatDate(item.end_date) + ' — ' + formatMoney(item.net_total) : item.services.map((service) => service.name).join(' + ') + ' — متبقي ' + item.remaining }
-function subscriptionSummary(item) { return item.plan_type === 'monthly' ? 'اشتراك شهري بقيمة ثابتة' : item.services.map((service) => service.name).join(' + ') }
+function subscriptionTitle(item) { return item.plan_type === 'monthly' ? 'اشتراك شهري — ' + formatSubscriptionSchedule(item.scheduled_weekdays) + ' — حتى ' + formatDate(item.end_date) : item.services.map((service) => service.name).join(' + ') + ' — متبقي ' + item.remaining }
+function subscriptionSummary(item) { return item.plan_type === 'monthly' ? 'اشتراك شهري · ' + formatSubscriptionSchedule(item.scheduled_weekdays) : item.services.map((service) => service.name).join(' + ') }
 function subscriptionValidity(item) { return item.plan_type === 'monthly' ? 'ينتهي ' + formatDate(item.end_date) : 'متبقي ' + item.remaining + ' من ' + item.sessions_count }
 function serviceTotal(service) { return decimal(numeric(service.price) + numeric(service.extra_unit_price) * Math.max(0, Number(extraUnits[service.id] || 0))) }
 function extraHint(service) { return 'سعر الواحدة ' + formatMoney(service.extra_unit_price) }
@@ -340,6 +343,7 @@ const formatDate = (value) => value ? new Intl.DateTimeFormat('ar-LY-u-nu-latn',
 .type-toggle { width: fit-content; }.locked-title, .locked-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 16px; }.locked-title { justify-content: flex-start; color: var(--color-primary); background: var(--color-info-bg); }.locked-row { border-top: 1px solid var(--color-hairline); }
 .service-lines { display: grid; gap: 1px; overflow: hidden; border: 1px solid var(--color-hairline); border-radius: var(--radius-field); background: var(--color-hairline); }.service-line { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(180px, .7fr) auto; align-items: center; gap: 16px; padding: 14px 16px; background: var(--color-canvas); }.service-copy, .service-copy span { display: block; }.service-copy span { margin-top: 3px; color: var(--color-ink-muted); font-size: 13px; }
 .settlement-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }.wallet-warning { display: flex; align-items: center; gap: 8px; padding: 12px 14px; color: var(--color-danger); border: 1px solid var(--color-danger-border); border-radius: var(--radius-field); background: var(--color-danger-bg); }
+.subscription-day-warning { display: flex; align-items: flex-start; gap: 8px; padding: 12px 14px; color: var(--color-warning); border-radius: var(--radius-field); background: var(--color-warning-bg); font-size: 13px; }
 .financial-summary { display: grid; grid-template-columns: repeat(3, 1fr); }.financial-summary div { display: flex; flex-direction: column; gap: 4px; padding: 16px; border-inline-start: 1px solid var(--color-hairline); border-top: 1px solid var(--color-hairline); }.financial-summary span { color: var(--color-ink-muted); font-size: 13px; }.financial-summary :deep(.money-text) { font-size: 19px; font-weight: 600; }.summary-net { background: var(--color-info-bg); }.coverage-note { display: flex; align-items: center; gap: 10px; color: var(--color-ink-muted); }.dialog-actions { gap: 8px; padding: 14px 24px 22px; border-top: 1px solid var(--color-hairline); }
 @media (max-width: 760px) { .summary-grid, .financial-summary { grid-template-columns: repeat(2, 1fr); }.service-line { grid-template-columns: 1fr; }.settlement-grid { grid-template-columns: 1fr; } } @media (max-width: 560px) { .step-indicator { padding-inline: 8px; }.step-indicator button { font-size: 12px; }.summary-grid, .financial-summary { grid-template-columns: 1fr; } }
 </style>
