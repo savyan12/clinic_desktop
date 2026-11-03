@@ -76,7 +76,7 @@ const router = createRouter({
         { path: 'session/:id', component: SessionPrintView, meta: { roles, title: 'طباعة إيصال جلسة', customPrintTemplate: true } },
         { path: 'statement/patient/:id', component: PatientStatementPrintView, meta: { roles, title: 'كشف حساب مريض', customPrintTemplate: true } },
         { path: 'statement/sponsor/:id', component: SponsorStatementPrintView, meta: { roles: ['admin'], title: 'كشف حساب جهة راعية' } },
-        { path: 'report/:type', component: ReportPrintView, meta: { roles: ['admin'], title: 'طباعة تقرير' } },
+        { path: 'report/:type', component: ReportPrintView, meta: { roles: ['admin'], title: 'طباعة تقرير', customPrintTemplate: true } },
       ],
     },
     { path: '/:pathMatch(.*)*', redirect: '/' },

@@ -12,6 +12,7 @@ use App\Models\Debt;
 use App\Models\Doctor;
 use App\Models\Payment;
 use App\Models\Session;
+use App\Models\Setting;
 use App\Models\Subscription;
 use App\Support\Money;
 use Mpdf\Mpdf;
@@ -317,25 +318,26 @@ class ReportService
         $writer = new Writer;
         $writer->openToFile($path);
         $rows = $this->rowsForExport($type, $report['rows']);
+        $columns = $this->reportColumns($type);
         $writer->addRow(Row::fromValues([$this->reportTitle($type)]));
         $writer->addRow(Row::fromValues(['الفترة', $this->periodLabel($report)]));
+        $writer->addRow(Row::fromValues(array_values($columns)));
 
-        if ($rows !== []) {
-            $writer->addRow(Row::fromValues(array_map(fn ($heading) => $this->headingLabel($heading), array_keys($rows[0]))));
-
-            foreach ($rows as $row) {
-                $writer->addRow(Row::fromValues(array_map(
-                    fn ($value, $key) => $this->displayValue($key, $value),
-                    array_values($row),
-                    array_keys($row),
-                )));
-            }
+        foreach ($rows as $row) {
+            $writer->addRow(Row::fromValues(array_map(
+                fn ($value, $key) => $this->displayValue($type, $key, $value),
+                array_values($row),
+                array_keys($row),
+            )));
         }
 
         $writer->addRow(Row::fromValues(['الإجماليات']));
 
         foreach ($report['totals'] as $key => $value) {
-            $writer->addRow(Row::fromValues([$this->headingLabel($key), $this->displayValue($key, $value)]));
+            $writer->addRow(Row::fromValues([
+                $this->totalLabel($type, $key),
+                $this->displayValue($type, $key, $value),
+            ]));
         }
 
         $writer->close();
@@ -354,33 +356,112 @@ class ReportService
         $mpdf = new Mpdf([
             'mode' => 'utf-8',
             'format' => 'A4',
+            'orientation' => 'P',
             'tempDir' => sys_get_temp_dir(),
             'autoScriptToLang' => true,
             'autoLangToFont' => true,
+            'margin_left' => 11,
+            'margin_right' => 11,
+            'margin_top' => 10,
+            'margin_bottom' => 18,
         ]);
         $mpdf->SetDirectionality('rtl');
+        $mpdf->SetTitle($this->reportTitle($type));
         $rows = $this->rowsForExport($type, $report['rows']);
-        $headings = $rows === [] ? [] : array_keys($rows[0]);
-        $headerHtml = implode('', array_map(fn ($heading) => '<th>'.e($this->headingLabel($heading)).'</th>', $headings));
-        $bodyHtml = implode('', array_map(function (array $row): string {
+        $columns = $this->reportColumns($type);
+        $headerHtml = implode('', array_map(fn (string $label): string => '<th>'.e($label).'</th>', array_values($columns)));
+        $bodyHtml = implode('', array_map(function (array $row) use ($type): string {
             $cells = '';
 
             foreach ($row as $key => $value) {
-                $cells .= '<td>'.e((string) $this->displayValue($key, $value)).'</td>';
+                $cells .= '<td>'.$this->pdfValueHtml($type, $key, $value).'</td>';
             }
 
             return '<tr>'.$cells.'</tr>';
         }, $rows));
-        $totalsHtml = '';
-
-        foreach ($report['totals'] as $key => $value) {
-            $totalsHtml .= '<tr><th>'.e($this->headingLabel($key)).'</th><td>'.e((string) $this->displayValue($key, $value)).'</td></tr>';
+        if ($bodyHtml === '') {
+            $bodyHtml = '<tr><td class="empty" colspan="'.count($columns).'">لا توجد بيانات ضمن الفترة المحددة</td></tr>';
         }
 
+        $summaryItems = $this->summaryItems($type, $report['totals']);
+        $summaryWidth = $summaryItems === [] ? 100 : 100 / count($summaryItems);
+        $summaryHtml = implode('', array_map(function (array $item) use ($type, $summaryWidth): string {
+            return '<td style="width:'.$summaryWidth.'%"><span>'.e($item['label']).'</span><strong>'.$this->pdfValueHtml($type, $item['key'], $item['value']).'</strong></td>';
+        }, $summaryItems));
+
+        $settings = Setting::query()->first();
         $title = e($this->reportTitle($type));
+        $clinicName = e($settings?->clinic_name ?: 'عيادة عين الحياة');
+        $clinicSubtitle = e($settings?->clinic_subtitle ?: 'للعلاج الطبيعي والتأهيل');
         $period = e($this->periodLabel($report));
-        $generatedAt = e(now()->format('Y-m-d H:i'));
-        $mpdf->WriteHTML("<html lang=\"ar\" dir=\"rtl\"><style>body{font-family:dejavusans;font-size:10px;color:#1d1d1f}h1{font-size:22px;margin:0 0 8px}.meta{color:#555;margin:0 0 16px}.report{border-collapse:collapse;width:100%}.report th,.report td{border:1px solid #ddd;padding:6px;text-align:right;vertical-align:top}.report th{background:#f5f5f7;font-weight:bold}.totals{border-collapse:collapse;margin-top:16px;width:45%}.totals th,.totals td{border:1px solid #ddd;padding:7px;text-align:right}.totals th{background:#f5f5f7}</style><body><h1>{$title}</h1><p class=\"meta\">الفترة: {$period} | تاريخ الإعداد: {$generatedAt}</p><table class=\"report\"><thead><tr>{$headerHtml}</tr></thead><tbody>{$bodyHtml}</tbody></table><h2>الإجماليات</h2><table class=\"totals\">{$totalsHtml}</table></body></html>");
+        $generatedAt = e($this->dateTimeLabel($report['meta']['generated_at'] ?? now()->toIso8601String()));
+        $address = e($settings?->address ?: '—');
+        $phone = e($settings?->phone ?: '—');
+        $receiptFooter = e($settings?->receipt_footer ?: '');
+        $logoHtml = $this->reportLogoHtml((bool) ($settings?->show_logo ?? true));
+        $logoCellHtml = $logoHtml === '' ? '' : '<td class="logo-cell">'.$logoHtml.'</td>';
+        $rowCount = count($rows);
+
+        $mpdf->SetHTMLFooter('<div style="border-top:1px solid #c9d4e2;padding-top:5px;color:#566277;font-size:8px;text-align:center"><table style="width:100%;border-collapse:collapse"><tr><td style="text-align:right">'.$address.'</td><td style="text-align:center">'.$receiptFooter.'</td><td style="text-align:left" dir="ltr">'.$phone.'</td></tr></table><div style="margin-top:3px">صفحة {PAGENO} من {nbpg}</div></div>');
+
+        $mpdf->WriteHTML(<<<HTML
+            <html lang="ar" dir="rtl">
+            <style>
+                body { font-family: dejavusans; font-size: 9px; color: #080b09; }
+                .header, .meta-table, .summary-table, .report { width: 100%; border-collapse: collapse; }
+                .header td { vertical-align: middle; padding: 0 0 7px; }
+                .brand-cell { width: 62%; text-align: right; }
+                .brand-wrap { width: 100%; border-collapse: collapse; }
+                .brand-wrap td { padding: 0; vertical-align: middle; }
+                .logo-cell { width: 17mm; }
+                .logo { width: 14mm; height: 14mm; }
+                .brand-name { margin: 0; color: #00694b; font-size: 20px; font-weight: bold; }
+                .brand-subtitle { margin-top: 2px; color: #566277; font-size: 10px; font-weight: bold; }
+                .title-cell { width: 38%; text-align: left; }
+                .title { margin: 0; font-size: 17px; font-weight: bold; }
+                .generated { margin-top: 3px; color: #566277; font-size: 8px; }
+                .brand-rule { height: 2px; margin-bottom: 8px; background: #00784f; }
+                .meta-table { margin-bottom: 8px; border: 1px solid #c9d4e2; }
+                .meta-table td { padding: 7px 9px; border-left: 1px solid #c9d4e2; vertical-align: top; }
+                .meta-table td:last-child { border-left: 0; }
+                .label, .summary-table span { display: block; color: #566277; font-size: 8px; font-weight: bold; }
+                .meta-value { display: block; margin-top: 2px; font-size: 10px; font-weight: bold; }
+                .summary-table { margin-bottom: 12px; border: 1px solid #c9d4e2; background: #eaf4ef; }
+                .summary-table td { padding: 8px 9px; border-left: 1px solid #c9d4e2; vertical-align: top; }
+                .summary-table td:last-child { border-left: 0; }
+                .summary-table strong { display: block; margin-top: 3px; font-size: 12px; }
+                .section-title { margin: 0; font-size: 14px; font-weight: bold; }
+                .section-rule { height: 2px; margin: 3px 0 7px; background: #00784f; }
+                .report { table-layout: fixed; border: 1px solid #c9d4e2; }
+                .report thead { display: table-header-group; }
+                .report tr { page-break-inside: avoid; }
+                .report th, .report td { padding: 6px 4px; border-bottom: 1px solid #c9d4e2; border-left: 1px solid #c9d4e2; text-align: center; vertical-align: middle; overflow-wrap: break-word; }
+                .report th:last-child, .report td:last-child { border-left: 0; }
+                .report th { background: #00784f; color: #fff; font-size: 8px; font-weight: bold; }
+                .report td { font-size: 8px; }
+                .empty { padding: 18px !important; color: #566277; }
+                .latin { direction: ltr; unicode-bidi: embed; font-family: dejavusans; }
+                .report-note { margin: 8px 0 0; color: #566277; font-size: 8px; }
+            </style>
+            <body>
+                <table class="header"><tr>
+                    <td class="brand-cell"><table class="brand-wrap"><tr>{$logoCellHtml}<td><div class="brand-name">{$clinicName}</div><div class="brand-subtitle">{$clinicSubtitle}</div></td></tr></table></td>
+                    <td class="title-cell"><div class="title">{$title}</div><div class="generated">أُعد في {$generatedAt}</div></td>
+                </tr></table>
+                <div class="brand-rule"></div>
+                <table class="meta-table"><tr>
+                    <td style="width:45%"><span class="label">الفترة</span><strong class="meta-value">{$period}</strong></td>
+                    <td style="width:35%"><span class="label">نوع التقرير</span><strong class="meta-value">{$title}</strong></td>
+                    <td style="width:20%"><span class="label">عدد النتائج</span><strong class="meta-value latin">{$rowCount}</strong></td>
+                </tr></table>
+                <table class="summary-table"><tr>{$summaryHtml}</tr></table>
+                <h2 class="section-title">بيانات التقرير</h2>
+                <div class="section-rule"></div>
+                <table class="report"><thead><tr>{$headerHtml}</tr></thead><tbody>{$bodyHtml}</tbody></table>
+                <p class="report-note">هذا التقرير يعرض كل مفهوم مالي بصورة مستقلة، ولا يُعد تقرير أرباح.</p>
+            </body>
+            </html>
+            HTML);
         $mpdf->Output($path, 'F');
 
         return ['path' => $path, 'name' => "تقرير-{$type}.pdf", 'mime' => 'application/pdf'];
@@ -404,23 +485,20 @@ class ReportService
      */
     private function rowsForExport(string $type, array $rows): array
     {
-        $columns = match ($type) {
-            'sessions' => ['opened_at', 'patient', 'doctor', 'services', 'net_total', 'status'],
-            'collections' => ['created_at', 'type', 'patient', 'method', 'amount'],
-            'debts' => ['id', 'patient', 'sponsor', 'amount', 'paid_amount', 'remaining', 'status'],
-            'doctor-dues' => ['name', 'sessions_count', 'earned', 'paid', 'remaining'],
-            'subscriptions' => ['patient', 'plan_type', 'start_date', 'end_date', 'sessions_count', 'sessions_used', 'remaining', 'remaining_days', 'net_total', 'status'],
-            default => [],
-        };
+        $columns = array_keys($this->reportColumns($type));
 
         return collect($rows)
-            ->map(function (array $row) use ($columns, $type): array {
-                $selected = collect($columns)->mapWithKeys(
-                    fn (string $column): array => [$column => $row[$column] ?? null],
-                )->all();
+            ->map(function (array $row) use ($columns): array {
+                $selected = [];
 
-                if ($type === 'subscriptions' && ($selected['status'] ?? null) === 'cancelled') {
-                    $selected['status'] = 'subscription_cancelled';
+                foreach ($columns as $column) {
+                    $selected[$column] = match ($column) {
+                        'subscription_end' => $row['end_date'] ?? $row['expected_end_date'] ?? null,
+                        'subscription_remaining' => ($row['plan_type'] ?? null) === 'monthly'
+                            ? ($row['remaining_days'] ?? 0).' يوم'
+                            : ($row['remaining'] ?? 0).' جلسة',
+                        default => $row[$column] ?? null,
+                    };
                 }
 
                 return $selected;
@@ -428,54 +506,249 @@ class ReportService
             ->all();
     }
 
-    private function headingLabel(string $key): string
+    /** @return array<string, string> */
+    private function reportColumns(string $type): array
     {
-        return [
-            'id' => 'الرقم', 'code' => 'الرمز', 'date' => 'التاريخ', 'opened_at' => 'تاريخ الجلسة',
-            'closed_at' => 'تاريخ الإغلاق', 'created_at' => 'التاريخ', 'patient' => 'المريض',
-            'patient_id' => 'رقم المريض', 'doctor' => 'الطبيب', 'doctor_id' => 'رقم الطبيب', 'services' => 'الخدمات',
-            'status' => 'الحالة', 'service_value' => 'قيمة الخدمات', 'type' => 'النوع',
-            'method' => 'طريقة الدفع', 'amount' => 'المبلغ', 'sponsor' => 'الجهة الراعية',
-            'sponsor_id' => 'رقم الجهة', 'kind' => 'نوع الدين', 'paid' => 'المدفوع',
-            'paid_amount' => 'المدفوع', 'remaining' => 'المتبقي', 'name' => 'الاسم',
-            'sessions_count' => 'عدد الجلسات', 'sessions_used' => 'الجلسات المستخدمة',
-            'remaining_sessions' => 'الجلسات المتبقية', 'remaining_days' => 'الأيام المتبقية',
-            'plan_type' => 'نوع الاشتراك', 'start_date' => 'تاريخ البداية', 'end_date' => 'تاريخ النهاية',
-            'net_total' => 'القيمة الصافية',
-            'discount' => 'الخصم', 'count' => 'العدد', 'received' => 'المقبوضات',
-            'refunds' => 'الاسترجاعات', 'net' => 'الصافي', 'original' => 'القيمة الأصلية',
-            'earned' => 'المستحق المكتسب', 'active' => 'الاشتراكات النشطة',
-        ][$key] ?? $key;
+        return match ($type) {
+            'sessions' => [
+                'opened_at' => 'التاريخ',
+                'patient' => 'المريض',
+                'doctor' => 'الطبيب',
+                'services' => 'الخدمات',
+                'net_total' => 'القيمة',
+                'status' => 'الحالة',
+            ],
+            'collections' => [
+                'created_at' => 'التاريخ',
+                'type' => 'النوع',
+                'patient' => 'المريض',
+                'method' => 'الطريقة',
+                'amount' => 'المبلغ',
+            ],
+            'debts' => [
+                'id' => 'المرجع',
+                'patient' => 'المريض',
+                'sponsor' => 'المسؤول',
+                'amount' => 'الأصل',
+                'paid_amount' => 'المسدد',
+                'remaining' => 'المتبقي',
+                'status' => 'الحالة',
+            ],
+            'doctor-dues' => [
+                'name' => 'الطبيب',
+                'sessions_count' => 'الجلسات',
+                'earned' => 'المكتسب',
+                'paid' => 'المصروف',
+                'remaining' => 'المتبقي',
+            ],
+            'subscriptions' => [
+                'patient' => 'المريض',
+                'plan_type' => 'النوع',
+                'start_date' => 'البداية',
+                'subscription_end' => 'النهاية',
+                'subscription_remaining' => 'المتبقي',
+                'net_total' => 'القيمة',
+                'status' => 'الحالة',
+            ],
+            default => [],
+        };
     }
 
-    private function displayValue(string $key, mixed $value): string|int|float|bool|null
+    private function totalLabel(string $type, string $key): string
     {
-        if (in_array($key, ['patient', 'doctor', 'sponsor'], true) && is_array($value)) {
-            return $value['name'] ?? '';
+        return match (true) {
+            $type === 'sessions' && $key === 'count' => 'عدد الجلسات',
+            $type === 'subscriptions' && $key === 'count' => 'عدد الاشتراكات',
+            $key === 'service_value' => 'قيمة الخدمات',
+            $key === 'received' => 'إجمالي المقبوضات',
+            $key === 'refunds' => 'إجمالي الاسترجاعات',
+            $key === 'net' => 'صافي المقبوضات',
+            $key === 'original' => 'إجمالي الديون',
+            $type === 'doctor-dues' && $key === 'paid' => 'إجمالي المصروف',
+            $key === 'paid' => 'إجمالي المسدد',
+            $key === 'remaining' => 'إجمالي المتبقي',
+            $key === 'earned' => 'إجمالي المستحق المكتسب',
+            $key === 'active' => 'الاشتراكات النشطة',
+            $key === 'remaining_sessions' => 'الجلسات المتبقية',
+            $key === 'net_total' => 'قيمة الاشتراكات',
+            default => $key,
+        };
+    }
+
+    private function displayValue(string $type, string $key, mixed $value): string
+    {
+        if (in_array($key, ['patient', 'doctor', 'sponsor'], true)) {
+            if ($key === 'sponsor' && $value === null) {
+                return 'المريض';
+            }
+
+            return is_array($value) ? ($value['name'] ?? '—') : '—';
         }
 
-        if ($key === 'services' && is_array($value)) {
-            return collect($value)->pluck('name')->implode('، ');
+        if ($key === 'services') {
+            $services = is_array($value) ? collect($value)->pluck('name')->filter()->implode('، ') : '';
+
+            return $services !== '' ? $services : '—';
         }
 
-        if (! is_scalar($value) && $value !== null) {
-            return json_encode($value, JSON_UNESCAPED_UNICODE);
+        if ($value === null || $value === '') {
+            return '—';
         }
 
-        $labels = [
-            'open' => 'مفتوحة', 'closed' => 'مغلقة', 'cancelled' => 'ملغاة',
-            'active' => 'نشط', 'completed' => 'مكتمل', 'stopped' => 'موقوف',
-            'subscription_cancelled' => 'ملغي',
-            'monthly' => 'شهري', 'legacy_package' => 'حزمة جلسات قديمة',
-            'partial' => 'جزئي', 'paid' => 'مسدد', 'void' => 'ملغى',
-            'cash' => 'نقدًا', 'transfer' => 'تحويل مصرفي',
-            'session_payment' => 'دفعة جلسة', 'subscription_payment' => 'دفعة اشتراك',
-            'wallet_topup' => 'شحن رصيد', 'debt_payment' => 'تسديد دين',
-            'refund' => 'استرجاع', 'adjustment' => 'تصحيح',
-            'session' => 'جلسة', 'subscription' => 'اشتراك', 'opening' => 'دين افتتاحي',
+        if (is_bool($value)) {
+            return $value ? 'نعم' : 'لا';
+        }
+
+        if (! is_scalar($value)) {
+            return '—';
+        }
+
+        $raw = (string) $value;
+
+        if (in_array($key, ['opened_at', 'created_at', 'start_date', 'end_date', 'subscription_end'], true)) {
+            return $this->dateLabel($raw);
+        }
+
+        if ($this->isMoneyKey($key)) {
+            return $this->moneyLabel($value);
+        }
+
+        if ($key === 'id') {
+            return '#'.$raw;
+        }
+
+        return $this->enumLabel($type, $key, $raw) ?? $raw;
+    }
+
+    private function enumLabel(string $type, string $key, string $value): ?string
+    {
+        return match (true) {
+            $key === 'status' && $value === 'open' && $type === 'sessions' => 'مفتوحة',
+            $key === 'status' && $value === 'open' => 'مفتوح',
+            $key === 'status' && $value === 'closed' => 'مغلقة',
+            $key === 'status' && $value === 'cancelled' && $type === 'subscriptions' => 'ملغي',
+            $key === 'status' && $value === 'cancelled' => 'ملغاة',
+            $key === 'status' && $value === 'active' => 'نشط',
+            $key === 'status' && $value === 'completed' => 'مكتمل',
+            $key === 'status' && $value === 'stopped' => 'موقوف',
+            $key === 'status' && $value === 'partial' => 'جزئي',
+            $key === 'status' && $value === 'paid' => 'مسدد',
+            $key === 'status' && $value === 'void' => 'ملغى',
+            $key === 'plan_type' && $value === 'monthly' => 'شهري',
+            $key === 'plan_type' && $value === 'legacy_package' => 'حزمة جلسات',
+            $key === 'method' && $value === 'cash' => 'نقدًا',
+            $key === 'method' && $value === 'transfer' => 'تحويل مصرفي',
+            $key === 'type' && $value === 'session_payment' => 'دفعة جلسة',
+            $key === 'type' && $value === 'subscription_payment' => 'دفعة اشتراك',
+            $key === 'type' && $value === 'wallet_topup' => 'شحن رصيد',
+            $key === 'type' && $value === 'debt_payment' => 'تسديد دين',
+            $key === 'type' && $value === 'refund' => 'استرجاع',
+            $key === 'type' && $value === 'adjustment' => 'تسوية',
+            default => null,
+        };
+    }
+
+    private function isMoneyKey(string $key): bool
+    {
+        return in_array($key, [
+            'service_value', 'received', 'refunds', 'net', 'original', 'paid', 'remaining',
+            'earned', 'net_total', 'amount', 'paid_amount',
+        ], true);
+    }
+
+    private function numberLabel(mixed $value): string
+    {
+        if (! is_numeric($value)) {
+            return (string) $value;
+        }
+
+        return rtrim(rtrim(number_format((float) $value, 3, '.', ''), '0'), '.');
+    }
+
+    private function moneyLabel(mixed $value): string
+    {
+        return $this->numberLabel($value).' د.ل';
+    }
+
+    private function dateLabel(string $value): string
+    {
+        try {
+            $date = new \DateTimeImmutable($value);
+        } catch (\Exception) {
+            return $value;
+        }
+
+        $months = [
+            1 => 'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
+            'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر',
         ];
 
-        return is_string($value) && isset($labels[$value]) ? $labels[$value] : $value;
+        return ((int) $date->format('j')).' '.$months[(int) $date->format('n')].' '.$date->format('Y');
+    }
+
+    private function dateTimeLabel(string $value): string
+    {
+        try {
+            $date = new \DateTimeImmutable($value);
+        } catch (\Exception) {
+            return $value;
+        }
+
+        return $this->dateLabel($value).'، '.$date->format('H:i');
+    }
+
+    private function pdfValueHtml(string $type, string $key, mixed $value): string
+    {
+        if ($this->isMoneyKey($key)) {
+            return '<span class="latin" dir="ltr">'.e($this->numberLabel($value)).'</span>&nbsp;د.ل';
+        }
+
+        if ($key === 'id') {
+            return '#<span class="latin" dir="ltr">'.e((string) $value).'</span>';
+        }
+
+        return '<span dir="auto">'.e($this->displayValue($type, $key, $value)).'</span>';
+    }
+
+    /**
+     * @param  array<string, mixed>  $totals
+     * @return array<int, array{key: string, label: string, value: mixed}>
+     */
+    private function summaryItems(string $type, array $totals): array
+    {
+        return collect($this->totalKeys($type))
+            ->filter(fn (string $key): bool => array_key_exists($key, $totals))
+            ->map(fn (string $key): array => [
+                'key' => $key,
+                'label' => $this->totalLabel($type, $key),
+                'value' => $totals[$key],
+            ])
+            ->values()
+            ->all();
+    }
+
+    /** @return array<int, string> */
+    private function totalKeys(string $type): array
+    {
+        return match ($type) {
+            'sessions' => ['count', 'service_value'],
+            'collections' => ['received', 'refunds', 'net'],
+            'debts' => ['original', 'paid', 'remaining'],
+            'doctor-dues' => ['earned', 'paid', 'remaining'],
+            'subscriptions' => ['count', 'active', 'remaining_sessions', 'net_total'],
+            default => [],
+        };
+    }
+
+    private function reportLogoHtml(bool $showLogo): string
+    {
+        $logoPath = base_path('../public/clinic-logo-128.png');
+
+        if (! $showLogo || ! is_file($logoPath)) {
+            return '';
+        }
+
+        return '<img class="logo" alt="" src="data:image/png;base64,'.base64_encode((string) file_get_contents($logoPath)).'">';
     }
 
     /** @param array<string, mixed> $report */
@@ -485,15 +758,15 @@ class ReportService
         $to = $report['meta']['to'] ?? null;
 
         if ($from && $to) {
-            return "من {$from} إلى {$to}";
+            return 'من '.$this->dateLabel($from).' إلى '.$this->dateLabel($to);
         }
 
         if ($from) {
-            return "من {$from}";
+            return 'من '.$this->dateLabel($from);
         }
 
         if ($to) {
-            return "حتى {$to}";
+            return 'حتى '.$this->dateLabel($to);
         }
 
         return 'كل الفترات';

@@ -15,7 +15,7 @@
       <div>
         <h1>{{ settings.clinic_name }}</h1>
         <p>{{ settings.clinic_subtitle }}</p>
-        <span>{{ settings.phone }} · {{ settings.address }}</span>
+        <span><bdi class="phone-value" dir="ltr">{{ settings.phone || '—' }}</bdi> · {{ settings.address || '—' }}</span>
       </div>
     </div>
     <router-view />

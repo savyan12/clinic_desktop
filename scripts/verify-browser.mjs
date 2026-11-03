@@ -112,7 +112,7 @@ const adminRoutes = [
   ['/reports/doctor-dues', 'تقرير مستحقات الأطباء'],
   ['/reports/subscriptions', 'تقرير الاشتراكات'],
   ['/audit-log', 'سجل للقراءة فقط'],
-  ['/settings', 'بيانات المركز المستخدمة'],
+  ['/settings', 'وضوح النص وأحجام الخطوط'],
   ['/print/session/1', 'إيصال جلسة'],
   ['/print/statement/patient/1', 'كشف حساب مريض'],
   ['/print/statement/sponsor/1', 'كشف حساب جهة راعية'],

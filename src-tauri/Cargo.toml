@@ -21,7 +21,7 @@ chrono = { version = "0.4.45", features = ["clock", "serde"] }
 chrono-tz = "0.10"
 hex = "0.4"
 http = "1"
-printpdf = "0.8"
+printpdf = { version = "0.8", features = ["png"] }
 rand = "0.9"
 rust_decimal = { version = "1", features = ["serde-with-str"] }
 rustybuzz = "0.20"

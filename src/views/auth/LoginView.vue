@@ -32,6 +32,7 @@
             color="primary"
             size="large"
             block
+            data-form-flow-primary
             :loading="auth.loading"
           >دخول</v-btn>
         </div>

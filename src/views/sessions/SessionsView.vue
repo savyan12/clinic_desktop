@@ -1,7 +1,7 @@
 <template>
   <div class="page-container page-stack">
     <PageHeader :title="auth.isAdmin ? 'الجلسات' : 'جلسات اليوم'" :subtitle="auth.isAdmin ? 'جميع الجلسات المسجلة مع البحث حسب التاريخ' : 'يعرض هذا القسم جلسات اليوم فقط؛ السجل السابق متاح من ملف المريض'" action-label="تسجيل جلسة جديدة" @action="sessionDialog = true" />
-    <div class="filter-grid surface-card">
+    <div class="filter-grid surface-card" data-form-flow-filter>
       <v-text-field v-model="filters.search" label="بحث" placeholder="المريض أو الهاتف أو رقم الجلسة" prepend-inner-icon="mdi-magnify" clearable @update:model-value="searchChanged" />
       <v-select v-model="filters.doctor_id" label="الطبيب" :items="doctors" item-title="name" item-value="id" clearable :loading="loadingDoctors" @update:model-value="filterChanged" />
       <v-select v-model="filters.status" label="الحالة" :items="statusItems" clearable @update:model-value="filterChanged" />
@@ -12,7 +12,7 @@
       <template #rows="{ items }">
         <tr v-for="session in items" :key="session.id" class="clickable-row" @click="router.push(`/sessions/${session.id}`)">
           <td><strong class="ltr-value">{{ session.code }}</strong></td>
-          <td><strong>{{ session.patient.name }}</strong><span class="cell-subtitle ltr-value">{{ session.patient.phone }}</span></td>
+          <td><strong>{{ session.patient.name }}</strong><span class="cell-subtitle phone-value">{{ session.patient.phone }}</span></td>
           <td>{{ formatDate(session.opened_at) }}</td>
           <td>{{ session.doctor.name }}</td>
           <td><span class="services-cell">{{ session.services.map((item) => item.name).join('، ') }}</span></td>

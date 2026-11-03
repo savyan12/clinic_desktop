@@ -15,6 +15,7 @@
     "verify:mock": "node scripts/verify-mock.mjs",
     "verify:real-api": "node scripts/verify-real-api.mjs",
     "verify:browser": "node scripts/verify-browser.mjs",
+    "verify:form-flow": "node scripts/verify-form-flow.mjs",
     "verify:ui": "node scripts/verify-ui.mjs"
   },
   "dependencies": {

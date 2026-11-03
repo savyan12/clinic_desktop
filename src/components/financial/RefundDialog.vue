@@ -10,7 +10,7 @@
         <v-select v-model="form.method" label="طريقة الاسترجاع" :items="paymentMethods" :error-messages="errors.method" />
         <v-textarea v-model="form.reason" label="سبب الاسترجاع" rows="3" :error-messages="errors.reason" />
       </v-card-text>
-      <v-card-actions class="dialog-actions"><v-btn variant="text" :disabled="saving" @click="close">إلغاء</v-btn><v-btn color="error" :loading="saving" @click="save">تأكيد الاسترجاع</v-btn></v-card-actions>
+      <v-card-actions class="dialog-actions"><v-btn variant="text" :disabled="saving" @click="close">إلغاء</v-btn><v-btn color="error" data-form-flow-primary :loading="saving" @click="save">تأكيد الاسترجاع</v-btn></v-card-actions>
     </v-card>
   </v-dialog>
 </template>

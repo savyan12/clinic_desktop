@@ -1,5 +1,5 @@
 <template>
-  <v-main class="auth-layout">
+  <v-main class="auth-layout" data-form-flow-page>
     <div class="auth-brand">
       <div class="brand-mark" aria-hidden="true">
         <ClinicLogo :size="84" alt="" />

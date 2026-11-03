@@ -12,7 +12,7 @@
       <router-link v-for="item in reportTypes" :key="item.value" :to="`/reports/${item.value}`" :class="{ active: type === item.value }"><v-icon :icon="item.icon" />{{ item.title }}</router-link>
     </nav>
 
-    <section class="surface-card report-filters">
+    <section class="surface-card report-filters" data-form-flow-filter>
       <v-text-field v-model="filters.from" label="من تاريخ" type="date" />
       <v-text-field v-model="filters.to" label="إلى تاريخ" type="date" />
       <v-select v-if="['sessions', 'doctor-dues'].includes(type)" v-model="filters.doctor_id" label="الطبيب" :items="doctors" item-title="name" item-value="id" clearable :loading="loadingFilters" />
@@ -25,7 +25,7 @@
       <v-select v-if="type === 'debts'" v-model="filters.kind" label="نوع الدين" :items="debtKinds" clearable />
       <v-select v-if="type === 'subscriptions'" v-model="filters.status" label="الحالة" :items="subscriptionStatuses" clearable />
       <v-checkbox v-if="type === 'subscriptions'" v-model="filters.near_end" label="قريبة من الانتهاء" :true-value="1" :false-value="null" hide-details />
-      <v-btn color="primary" prepend-icon="mdi-filter-outline" @click="load">تطبيق الفلاتر</v-btn>
+      <v-btn color="primary" prepend-icon="mdi-filter-outline" data-form-flow-filter-action @click="load">تطبيق الفلاتر</v-btn>
       <v-btn variant="text" @click="clearFilters">مسح</v-btn>
     </section>
     <InlineError v-if="filterError" :message="filterError" retry @retry="loadFilters" />
@@ -34,16 +34,10 @@
     <InlineError v-else-if="error" :message="error" retry @retry="load" />
     <template v-else-if="report">
       <section class="report-totals">
-        <div v-for="(value, key) in report.totals" :key="key"><span>{{ totalLabel(key) }}</span><MoneyText v-if="isMoneyTotal(key)" :value="value" /><strong v-else class="ltr-value">{{ value }}</strong></div>
+        <div v-for="item in summaryItems" :key="item.key"><span>{{ item.label }}</span><MoneyText v-if="item.money" :value="item.value" /><strong v-else class="ltr-value">{{ item.value }}</strong></div>
       </section>
       <section class="report-table">
-        <div v-if="report.rows.length" class="table-scroll"><v-table><thead><tr><th v-for="header in currentReport.headers" :key="header">{{ header }}</th></tr></thead><tbody>
-          <template v-if="type === 'sessions'"><tr v-for="row in report.rows" :key="row.id"><td>{{ formatDate(row.opened_at) }}</td><td>{{ row.patient.name }}</td><td>{{ row.doctor.name }}</td><td>{{ row.services.map((item) => item.name).join('، ') }}</td><td><MoneyText :value="row.net_total" /></td><td><StatusChip type="session" :value="row.status" /></td></tr></template>
-          <template v-else-if="type === 'collections'"><tr v-for="row in report.rows" :key="row.id"><td>{{ formatDate(row.created_at) }}</td><td>{{ paymentType(row.type) }}</td><td>{{ row.patient?.name || '—' }}</td><td>{{ labelFor('paymentMethod', row.method) }}</td><td><MoneyText :value="row.amount" /></td></tr></template>
-          <template v-else-if="type === 'debts'"><tr v-for="row in report.rows" :key="row.id"><td>#{{ row.id }}</td><td>{{ row.patient.name }}</td><td>{{ row.sponsor?.name || 'المريض' }}</td><td><MoneyText :value="row.amount" /></td><td><MoneyText :value="row.paid_amount" /></td><td><MoneyText :value="row.remaining" /></td><td><StatusChip type="debt" :value="row.status" /></td></tr></template>
-          <template v-else-if="type === 'doctor-dues'"><tr v-for="row in report.rows" :key="row.id"><td>{{ row.name }}</td><td>{{ row.sessions_count }}</td><td><MoneyText :value="row.earned" /></td><td><MoneyText :value="row.paid" /></td><td><MoneyText :value="row.remaining" /></td></tr></template>
-          <template v-else><tr v-for="row in report.rows" :key="row.id"><td>{{ row.patient.name }}</td><td>{{ row.plan_type === 'monthly' ? 'شهري' : 'باقة قديمة' }}</td><td>{{ formatDate(row.start_date) }}</td><td>{{ formatDate(row.end_date || row.expected_end_date) }}</td><td>{{ row.plan_type === 'monthly' ? `${row.remaining_days} يوم` : `${row.remaining} جلسة` }}</td><td><MoneyText :value="row.net_total" /></td><td><StatusChip type="subscription" :value="row.status" /></td></tr></template>
-        </tbody></v-table></div>
+        <ReportTable v-if="report.rows.length" :type="type" :rows="report.rows" />
         <EmptyState v-else icon="mdi-chart-box-outline" title="لا توجد نتائج للتقرير" description="غيّر الفترة أو الفلاتر ثم أعد المحاولة." />
       </section>
       <p class="report-note">أُعد التقرير في {{ generatedAt }}. لا يوجد تقرير أرباح؛ الأرقام تفصل قيمة الخدمات والمقبوضات والديون ومستحقات الأطباء.</p>
@@ -62,20 +56,14 @@ import EmptyState from '@/components/common/EmptyState.vue'
 import InlineError from '@/components/common/InlineError.vue'
 import MoneyText from '@/components/common/MoneyText.vue'
 import PageHeader from '@/components/common/PageHeader.vue'
-import StatusChip from '@/components/common/StatusChip.vue'
-import { labelFor, paymentMethods } from '@/constants/labels'
+import ReportTable from '@/components/reports/ReportTable.vue'
+import { paymentMethods } from '@/constants/labels'
+import { formatReportDateTime, getReportDefinition, reportSummaryItems, reportTypes } from '@/constants/reports'
 import { useUiStore } from '@/stores/ui'
 
 const route = useRoute(); const router = useRouter(); const ui = useUiStore()
-const reportTypes = [
-  { value: 'sessions', title: 'تقرير الجلسات', description: 'الجلسات والخدمات والأطباء وقيم الخدمات خلال الفترة.', icon: 'mdi-clipboard-pulse-outline', headers: ['التاريخ', 'المريض', 'الطبيب', 'الخدمات', 'القيمة', 'الحالة'] },
-  { value: 'collections', title: 'تقرير المقبوضات', description: 'الدفعات والاسترجاعات وصافي حركة المقبوضات.', icon: 'mdi-cash-multiple', headers: ['التاريخ', 'النوع', 'المريض', 'الطريقة', 'المبلغ'] },
-  { value: 'debts', title: 'تقرير الديون', description: 'المبالغ الأصلية والمسدد والمتبقي حسب المريض والجهة.', icon: 'mdi-file-clock-outline', headers: ['المرجع', 'المريض', 'المسؤول', 'الأصل', 'المسدد', 'المتبقي', 'الحالة'] },
-  { value: 'doctor-dues', title: 'تقرير مستحقات الأطباء', description: 'المستحقات المكتسبة والمصروفة والمتبقية لكل طبيب.', icon: 'mdi-doctor', headers: ['الطبيب', 'الجلسات', 'المكتسب', 'المصروف', 'المتبقي'] },
-  { value: 'subscriptions', title: 'تقرير الاشتراكات', description: 'الاشتراكات الشهرية ومددها وقيمها وحالاتها.', icon: 'mdi-wallet-membership', headers: ['المريض', 'النوع', 'البداية', 'النهاية', 'المتبقي', 'القيمة', 'الحالة'] },
-]
 const type = computed(() => reportTypes.some((item) => item.value === route.params.type) ? route.params.type : 'sessions')
-const currentReport = computed(() => reportTypes.find((item) => item.value === type.value))
+const currentReport = computed(() => getReportDefinition(type.value))
 const report = ref(null); const loading = ref(true); const error = ref(''); const doctors = ref([]); const patients = ref([]); const sponsors = ref([]); const downloading = ref('')
 const loadingFilters = ref(false)
 const filterError = ref('')
@@ -98,7 +86,8 @@ const subscriptionStatuses = [{ title: 'نشط', value: 'active' }, { title: 'م
 const debtStatuses = [{ title: 'مفتوح', value: 'open' }, { title: 'جزئي', value: 'partial' }, { title: 'مسدد', value: 'paid' }, { title: 'ملغى', value: 'void' }]
 const debtKinds = [{ title: 'جلسة', value: 'session' }, { title: 'اشتراك', value: 'subscription' }, { title: 'افتتاحي', value: 'opening' }]
 const paymentTypes = [{ title: 'دفعة جلسة', value: 'session_payment' }, { title: 'دفعة اشتراك', value: 'subscription_payment' }, { title: 'شحن رصيد', value: 'wallet_topup' }, { title: 'تسديد دين', value: 'debt_payment' }, { title: 'استرجاع', value: 'refund' }]
-const generatedAt = computed(() => new Intl.DateTimeFormat('ar-LY-u-nu-latn', { dateStyle: 'long', timeStyle: 'short' }).format(new Date()))
+const generatedAt = computed(() => formatReportDateTime(report.value?.meta?.generated_at))
+const summaryItems = computed(() => reportSummaryItems(type.value, report.value?.totals))
 onMounted(() => {
   if (!route.params.type) { router.replace('/reports/sessions'); return }
   load()
@@ -143,9 +132,6 @@ function clearFilters() {
   Object.assign(filters, { from: '', to: '', doctor_id: null, patient_id: null, sponsor_id: null, transaction_type: null, method: null, status: null, kind: null, near_end: null })
   load()
 }
-function totalLabel(key) { return ({ count: 'عدد السجلات', service_value: 'قيمة الخدمات', received: 'إجمالي المقبوض', refunds: 'الاسترجاعات', net: 'صافي المقبوضات', original: 'إجمالي الديون', paid: 'المسدد / المصروف', remaining: 'المتبقي', earned: 'المستحق المكتسب', active: 'الاشتراكات النشطة', remaining_sessions: 'الجلسات المتبقية', net_total: 'قيمة الاشتراكات' }[key] || key) }
-function isMoneyTotal(key) { return ['service_value', 'received', 'refunds', 'net', 'original', 'paid', 'remaining', 'earned', 'net_total'].includes(key) }
-const formatDate = (value) => new Intl.DateTimeFormat('ar-LY-u-nu-latn', { dateStyle: 'medium' }).format(new Date(value)); const paymentType = (value) => ({ wallet_topup: 'شحن رصيد', session_payment: 'دفعة جلسة', subscription_payment: 'دفعة اشتراك', debt_payment: 'تسديد دين', refund: 'استرجاع' }[value] || value)
 function reportParams() {
   return Object.fromEntries(Object.entries({ ...filters, type: filters.transaction_type }).filter(([key, value]) => key !== 'transaction_type' && value !== null && value !== ''))
 }
@@ -171,5 +157,5 @@ async function downloadExport(format) {
 </script>
 
 <style scoped>
-.report-nav { display: flex; flex-wrap: wrap; gap: 8px; }.report-nav a { min-height: 44px; display: flex; align-items: center; gap: 8px; padding: 10px 16px; color: var(--color-ink-muted); border: 1px solid var(--color-hairline); border-radius: var(--radius-pill); }.report-nav a.active { color: var(--color-primary); border-color: var(--color-primary); background: var(--color-info-bg); }.report-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; align-items: end; }.report-totals { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); overflow: hidden; border: 1px solid var(--color-hairline); border-radius: var(--radius-card); }.report-totals div { display: grid; gap: 5px; padding: 20px; border-inline-start: 1px solid var(--color-hairline); }.report-totals span { color: var(--color-ink-muted); font-size: 13px; }.report-totals strong, .report-totals :deep(.money-text) { font-size: 24px; font-weight: 600; }.report-table { overflow: hidden; border: 1px solid var(--color-hairline); border-radius: var(--radius-card); }.table-scroll { overflow-x: auto; }.table-scroll :deep(table) { min-width: 860px; }.report-note { margin: 0; color: var(--color-ink-muted); font-size: 13px; }
+.report-nav { display: flex; flex-wrap: wrap; gap: 8px; }.report-nav a { min-height: 44px; display: flex; align-items: center; gap: 8px; padding: 10px 16px; color: var(--color-ink-muted); border: 1px solid var(--color-hairline); border-radius: var(--radius-pill); }.report-nav a.active { color: var(--color-primary); border-color: var(--color-primary); background: var(--color-info-bg); }.report-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; align-items: end; }.report-totals { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); overflow: hidden; border: 1px solid var(--color-hairline); border-radius: var(--radius-card); }.report-totals div { display: grid; gap: 5px; padding: 20px; border-inline-start: 1px solid var(--color-hairline); }.report-totals span { color: var(--color-ink-muted); font-size: 13px; }.report-totals strong, .report-totals :deep(.money-text) { font-size: 24px; font-weight: 600; }.report-table { overflow: hidden; border: 1px solid var(--color-hairline); border-radius: var(--radius-card); }.report-note { margin: 0; color: var(--color-ink-muted); font-size: 13px; }
 </style>

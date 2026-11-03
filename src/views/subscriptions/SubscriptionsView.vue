@@ -1,7 +1,7 @@
 <template>
   <div class="page-container page-stack">
     <PageHeader title="الاشتراكات" subtitle="اشتراكات شهرية بقيمة ثابتة ومدة بداية ونهاية" action-label="إضافة اشتراك شهري" @action="dialog = true" />
-    <div class="subscription-toolbar surface-card">
+    <div class="subscription-toolbar surface-card" data-form-flow-filter>
       <v-text-field v-model="filters.search" label="بحث بالمريض أو الهاتف" prepend-inner-icon="mdi-magnify" clearable @update:model-value="searchChanged" />
       <v-select v-model="filters.status" label="الحالة" :items="statusItems" clearable @update:model-value="statusChanged" />
       <v-checkbox v-model="nearEnd" label="قريبة من الانتهاء" color="primary" hide-details @update:model-value="nearChanged" />
@@ -9,8 +9,8 @@
     <DataTableCard :headers="headers" :items="subscriptions" :loading="loading" :error="error" :meta="meta" :empty="{ icon: 'mdi-wallet-membership', title: 'لا توجد اشتراكات مطابقة', description: 'غيّر البحث أو الفلاتر، أو أنشئ اشتراكًا جديدًا.', actionLabel: 'إضافة اشتراك' }" @retry="load" @page="changePage" @empty-action="dialog = true">
       <template #rows="{ items }">
         <tr v-for="item in items" :key="item.id" class="clickable-row" @click="router.push(`/subscriptions/${item.id}`)">
-          <td><strong>{{ item.patient.name }}</strong><span class="cell-subtitle ltr-value">{{ item.patient.phone }}</span></td>
-          <td><strong>{{ item.plan_type === 'monthly' ? 'شهري' : 'باقة قديمة' }}</strong><span v-if="item.plan_type !== 'monthly'" class="cell-subtitle">{{ item.sessions_used }} من {{ item.sessions_count }} جلسة</span></td>
+          <td><strong>{{ item.patient.name }}</strong><span class="cell-subtitle phone-value">{{ item.patient.phone }}</span></td>
+          <td><strong>{{ item.plan_type === 'monthly' ? 'شهري' : 'باقة قديمة' }}</strong><span class="cell-subtitle">{{ item.plan_type === 'monthly' ? formatSubscriptionSchedule(item.scheduled_weekdays) : `${item.sessions_used} من ${item.sessions_count} جلسة` }}</span></td>
           <td>{{ formatDate(item.start_date) }}<span class="cell-subtitle">إلى {{ formatDate(item.end_date || item.expected_end_date) }}</span></td>
           <td><MoneyText :value="item.net_total" /></td><td><MoneyText :value="item.paid_amount" /></td><td><MoneyText :value="item.remaining_amount" /></td>
           <td><StatusChip type="subscription" :value="item.status" /><span v-if="item.plan_type === 'monthly' && item.status === 'active'" class="cell-subtitle" :class="{ near: item.remaining_days <= 7 }">متبقي {{ item.remaining_days }} يوم</span></td>
@@ -32,6 +32,7 @@ import PageHeader from '@/components/common/PageHeader.vue'
 import StatusChip from '@/components/common/StatusChip.vue'
 import CreateSubscriptionDialog from '@/components/subscriptions/CreateSubscriptionDialog.vue'
 import { useDebounce } from '@/composables/useDebounce'
+import { formatSubscriptionSchedule } from '@/constants/subscriptions'
 
 const route = useRoute(); const router = useRouter(); const debounce = useDebounce()
 const subscriptions = ref([]); const meta = ref(null); const loading = ref(true); const error = ref(''); const dialog = ref(false)

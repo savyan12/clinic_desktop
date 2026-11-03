@@ -16,7 +16,9 @@
 </template>
 
 <script setup>
+import { useFormFlow } from '@/composables/useFormFlow'
 import { useUiStore } from '@/stores/ui'
 
 const ui = useUiStore()
+useFormFlow()
 </script>

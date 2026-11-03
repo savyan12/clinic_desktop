@@ -20,7 +20,7 @@
       </div>
 
       <section class="detail-grid">
-        <div class="detail-item"><span class="detail-label">المريض</span><router-link :to="'/patients/' + session.patient.id"><strong>{{ session.patient.name }}</strong></router-link><span class="sub-value ltr-value">{{ session.patient.phone }}</span></div>
+        <div class="detail-item"><span class="detail-label">المريض</span><router-link :to="'/patients/' + session.patient.id"><strong>{{ session.patient.name }}</strong></router-link><span class="sub-value phone-value">{{ session.patient.phone }}</span></div>
         <div class="detail-item"><span class="detail-label">الطبيب المسؤول</span><strong>{{ session.doctor.name }}</strong><span class="sub-value">نسبة محفوظة {{ session.commission_rate || 0 }}%</span></div>
         <div class="detail-item"><span class="detail-label">نوع الجلسة</span><strong>{{ labelFor('sessionType', session.type) }}</strong><router-link v-if="session.subscription_id" :to="'/subscriptions/' + session.subscription_id">عرض الاشتراك</router-link></div>
         <div class="detail-item"><span class="detail-label">سجلها</span><strong>{{ session.created_by_user?.name }}</strong><span class="sub-value">{{ formatDate(session.opened_at) }}</span></div>
@@ -96,7 +96,7 @@
         <div v-if="session?.type === 'individual'" class="impact-preview"><span>صافي قديم <MoneyText :value="session?.net_total" /></span><span>صافي جديد <MoneyText :value="correctedNet" /></span><span>دين جديد <MoneyText :value="correctionDebtAmount" /></span></div>
         <div v-else class="subscription-correction-note">تصحيح جلسة الاشتراك يغيّر الطبيب والعمولة المحفوظة فقط.</div>
       </v-card-text>
-      <v-card-actions class="dialog-actions"><v-btn variant="text" :disabled="correcting" @click="correctionDialog = false">تراجع</v-btn><v-btn color="primary" :loading="correcting" :disabled="correctionOverAllocated || loadingOptions || Boolean(optionsError)" @click="applyCorrection">تأكيد التصحيح</v-btn></v-card-actions>
+      <v-card-actions class="dialog-actions"><v-btn variant="text" :disabled="correcting" @click="correctionDialog = false">تراجع</v-btn><v-btn color="primary" data-form-flow-primary :loading="correcting" :disabled="correctionOverAllocated || loadingOptions || Boolean(optionsError)" @click="applyCorrection">تأكيد التصحيح</v-btn></v-card-actions>
     </v-card>
   </v-dialog>
 </template>

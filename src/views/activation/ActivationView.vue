@@ -1,5 +1,5 @@
 <template>
-  <main class="activation-page">
+  <main class="activation-page" data-form-flow-page>
     <section class="activation-shell">
       <header class="activation-brand">
         <ClinicLogo :size="84" />
@@ -45,7 +45,7 @@
           <v-btn value="restore" prepend-icon="mdi-backup-restore">استكمال من نسخة احتياطية</v-btn>
         </v-btn-toggle>
 
-        <section v-if="mode === 'new'" class="activation-form">
+        <section v-if="mode === 'new'" class="activation-form" data-form-flow-scope>
           <div class="section-copy">
             <h2>إنشاء منظومة جديدة</h2>
             <p>سيتم تهيئة المنظومة للعمل فور تعبئة البيانات</p>
@@ -83,13 +83,14 @@
             <v-btn
               color="primary"
               prepend-icon="mdi-check-circle-outline"
+              data-form-flow-primary
               :loading="desktop.loading"
               @click="activateNew"
             >إنشاء وتفعيل النظام</v-btn>
           </div>
         </section>
 
-        <section v-else class="activation-form">
+        <section v-else class="activation-form" data-form-flow-scope>
           <div class="section-copy">
             <h2>الاستعادة من USB</h2>
             <p>
@@ -136,6 +137,7 @@
             <v-btn
               color="primary"
               prepend-icon="mdi-backup-restore"
+              data-form-flow-primary
               :disabled="!selectedBackup"
               :loading="desktop.loading"
               @click="restore"
