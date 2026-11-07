@@ -329,6 +329,24 @@ pub async fn refund(
         return Err(ApiError::validation("لا يمكن استرجاع هذه الدفعة.")
             .field("payment_id", "الدفعة المحددة ليست دفعة قابلة للاسترجاع."));
     }
+    let attributed_to_subscription = original.subscription_id.is_some()
+        || sqlx::query_scalar::<_, u64>(
+            "SELECT CAST(COUNT(*) AS UNSIGNED) FROM payment_allocations pa \
+             INNER JOIN debts d ON d.id = pa.debt_id \
+             WHERE pa.payment_id = ? AND d.subscription_id IS NOT NULL",
+        )
+        .bind(original.id)
+        .fetch_one(&mut **transaction)
+        .await?
+            > 0;
+    if attributed_to_subscription {
+        return Err(
+            ApiError::validation("استرجاع دفعات الاشتراك يتم من خلال إلغاء الاشتراك فقط.").field(
+                "payment_id",
+                "استخدم إجراء إلغاء الاشتراك لتسجيل الاسترجاع وتخصيصه ماليًا.",
+            ),
+        );
+    }
     let already_refunded = sqlx::query_scalar::<_, Option<Decimal>>(
         "SELECT SUM(ABS(amount)) FROM payments WHERE reverses_payment_id = ? AND type = 'refund'",
     )
@@ -436,7 +454,7 @@ pub async fn doctor_payout(
         .await?
         .ok_or_else(ApiError::not_found)?;
     let earned = sqlx::query_scalar::<_, Option<Decimal>>(
-        "SELECT SUM(commission_amount) FROM sessions WHERE doctor_id = ? AND status = 'closed'",
+        "SELECT SUM(commission_amount) FROM sessions WHERE doctor_id = ? AND type = 'individual' AND status = 'closed' AND commission_amount IS NOT NULL",
     )
     .bind(doctor_id)
     .fetch_one(&mut **transaction)

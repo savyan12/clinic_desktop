@@ -83,12 +83,13 @@ try {
     const actionKeys = [
       'debt_payment_recorded', 'debt_settled', 'doctor_created', 'doctor_paid',
       'doctor_payout_created', 'doctor_rate_changed',
+      'expense_created', 'expense_corrected', 'expense_cancelled',
       'doctor_updated', 'opening_debt_created', 'patient_created', 'patient_updated',
       'payment_recorded', 'payment_refunded', 'service_created', 'service_price_changed',
       'service_updated', 'session_cancelled', 'session_closed', 'session_corrected',
       'session_created', 'session_services_added', 'session_updated', 'settings_updated',
       'sponsor_created', 'sponsor_updated', 'subscription_cancelled', 'subscription_corrected',
-      'subscription_created', 'subscription_reactivated', 'subscription_stopped', 'user_created',
+      'subscription_created', 'user_created',
       'user_password_reset', 'user_updated', 'wallet_topped_up', 'wallet_topup_refunded',
     ]
     actionKeys.forEach((key) => {
@@ -146,21 +147,27 @@ try {
       collections: ['التاريخ', 'النوع', 'المريض', 'الطريقة', 'المبلغ'],
       debts: ['المرجع', 'المريض', 'المسؤول', 'الأصل', 'المسدد', 'المتبقي', 'الحالة'],
       'doctor-dues': ['الطبيب', 'الجلسات', 'المكتسب', 'المصروف', 'المتبقي'],
-      subscriptions: ['المريض', 'النوع', 'البداية', 'النهاية', 'المتبقي', 'القيمة', 'الحالة'],
+      subscriptions: ['المريض', 'الاشتراك', 'البداية', 'المتبقي', 'الجلسات والطبيب المشرف', 'سعر الاشتراك', 'الحالة'],
+      expenses: ['التاريخ', 'النوع', 'الوصف', 'المستلم', 'المرجع', 'طريقة الدفع', 'المبلغ', 'الحالة'],
     }
     Object.entries(expectedColumns).forEach(([type, labels]) => {
       assert.deepEqual(getReportDefinition(type).columns.map((column) => column.label), labels)
     })
 
     const subscription = getReportDefinition('subscriptions')
-    const row = { plan_type: 'monthly', remaining_days: 8, end_date: '2026-11-30' }
-    assert.equal(reportCellLabel(subscription.columns[1], row), 'شهري')
-    assert.equal(reportCellLabel(subscription.columns[4], row), '8 يوم')
-    assert.match(reportCellLabel(subscription.columns[3], row), /2026/)
+    const row = { name: 'تأهيل متكامل', remaining: 8, total_price: '200.000' }
+    assert.equal(reportCellLabel(subscription.columns[1], row), 'تأهيل متكامل')
+    assert.equal(reportCellLabel(subscription.columns[3], row), '8 جلسة')
+    assert.equal(reportCellLabel(subscription.columns[5], row), '200 د.ل')
     assert.deepEqual(
       reportSummaryItems('collections', { received: '80.000', refunds: '5.000', net: '75.000' })
         .map(({ label, money }) => [label, money]),
       [['إجمالي المقبوضات', true], ['إجمالي الاسترجاعات', true], ['صافي المقبوضات', true]],
+    )
+    assert.deepEqual(
+      reportSummaryItems('expenses', { count: 2, total_purchases: '80.000', total_rent: '500.000', total_expenses: '580.000' })
+        .map(({ label, money }) => [label, Boolean(money)]),
+      [['عدد العمليات', false], ['إجمالي المشتريات', true], ['إجمالي الإيجار', true], ['إجمالي المصروفات', true]],
     )
   })
 

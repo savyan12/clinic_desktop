@@ -5,7 +5,6 @@ import pluginVue from 'eslint-plugin-vue'
 export default [
   {
     ignores: [
-      'backend/**',
       'dist/**',
       'node_modules/**',
       'src-tauri/**',

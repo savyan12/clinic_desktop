@@ -6,7 +6,7 @@
       <PageHeader :title="'الجلسة ' + session.code" :subtitle="session.patient.name + ' · ' + formatDate(session.opened_at)">
         <template #actions>
           <v-btn :to="'/print/session/' + session.id" variant="outlined" prepend-icon="mdi-printer-outline">طباعة</v-btn>
-          <v-btn v-if="session.status === 'closed'" color="primary" prepend-icon="mdi-plus-circle-outline" @click="additionDialog = true">إضافة خدمات</v-btn>
+          <v-btn v-if="session.status === 'closed' && session.type === 'individual'" color="primary" prepend-icon="mdi-plus-circle-outline" @click="additionDialog = true">إضافة خدمات</v-btn>
           <v-btn v-if="session.status === 'closed' && isAdmin" variant="outlined" prepend-icon="mdi-file-edit-outline" @click="openCorrection">تصحيح الجلسة</v-btn>
           <v-btn v-if="session.status === 'closed' && isAdmin" color="error" variant="outlined" prepend-icon="mdi-cancel" @click="askCancel">إلغاء جلسة مغلقة</v-btn>
         </template>
@@ -14,14 +14,15 @@
 
       <div class="session-banner" :class="'banner-' + session.status">
         <StatusChip type="session" :value="session.status" />
-        <span v-if="session.status === 'closed'">سُجلت الجلسة مغلقة مباشرة وثُبتت الحركات المالية ومستحق الطبيب.</span>
+        <span v-if="session.status === 'closed' && session.type === 'subscription'">سُجل حضور جلسة الاشتراك والطبيب المشرف دون إنشاء عمولة أو حركة مالية مستقلة.</span>
+        <span v-else-if="session.status === 'closed'">سُجلت الجلسة مغلقة مباشرة وثُبتت الحركات المالية ومستحق الطبيب.</span>
         <span v-else-if="session.status === 'cancelled'">أُلغيت الجلسة: {{ session.cancel_reason }}</span>
         <span v-else>هذه جلسة قديمة مفتوحة؛ لا يستطيع موظف الاستقبال تعديلها.</span>
       </div>
 
       <section class="detail-grid">
         <div class="detail-item"><span class="detail-label">المريض</span><router-link :to="'/patients/' + session.patient.id"><strong>{{ session.patient.name }}</strong></router-link><span class="sub-value phone-value">{{ session.patient.phone }}</span></div>
-        <div class="detail-item"><span class="detail-label">الطبيب المسؤول</span><strong>{{ session.doctor.name }}</strong><span class="sub-value">نسبة محفوظة {{ session.commission_rate || 0 }}%</span></div>
+        <div class="detail-item"><span class="detail-label">{{ session.type === 'subscription' ? 'الطبيب المشرف' : 'الطبيب المسؤول' }}</span><strong>{{ session.doctor.name }}</strong><span class="sub-value">{{ session.type === 'subscription' ? 'إشراف تشغيلي دون عمولة' : `نسبة محفوظة ${session.commission_rate || 0}%` }}</span></div>
         <div class="detail-item"><span class="detail-label">نوع الجلسة</span><strong>{{ labelFor('sessionType', session.type) }}</strong><router-link v-if="session.subscription_id" :to="'/subscriptions/' + session.subscription_id">عرض الاشتراك</router-link></div>
         <div class="detail-item"><span class="detail-label">سجلها</span><strong>{{ session.created_by_user?.name }}</strong><span class="sub-value">{{ formatDate(session.opened_at) }}</span></div>
       </section>
@@ -54,7 +55,8 @@
             <div><span>مدفوع</span><MoneyText :value="session.settlement.paid_amount" /></div>
             <div><span>دين</span><MoneyText :value="session.settlement.debt_amount" /></div>
           </div>
-          <div v-if="session.status === 'closed'" class="commission-box"><span>مستحق الطبيب من هذه الجلسة</span><MoneyText :value="session.commission_amount" /></div>
+          <div v-if="session.status === 'closed' && session.type === 'individual'" class="commission-box"><span>مستحق الطبيب من هذه الجلسة</span><MoneyText :value="session.commission_amount" /></div>
+          <div v-else-if="session.status === 'closed' && session.type === 'subscription' && session.commission_amount != null" class="commission-box historical"><span>عمولة تاريخية محفوظة قبل تغيير السياسة</span><MoneyText :value="session.commission_amount" /></div>
           <div v-if="session.additions?.length" class="addition-summary"><strong>إضافات مثبتة: {{ session.additions.length }}</strong><span>كل إضافة محفوظة كسجل مستقل مع تسويتها.</span></div>
         </div>
       </section>
@@ -72,7 +74,7 @@
   </div>
 
   <ConfirmDialog v-model="confirm.open" :title="confirm.title" :message="confirm.message" :confirm-label="confirm.label" require-reason danger :loading="confirm.loading" @confirm="executeCancel" />
-  <AddSessionServicesDialog v-if="session" v-model="additionDialog" :session="session" @saved="servicesAdded" />
+  <AddSessionServicesDialog v-if="session?.type === 'individual'" v-model="additionDialog" :session="session" @saved="servicesAdded" />
 
   <v-dialog v-model="correctionDialog" persistent max-width="620">
     <v-card>
@@ -94,7 +96,7 @@
         </template>
         <v-textarea v-model="correction.reason" label="سبب التصحيح (مطلوب)" rows="3" />
         <div v-if="session?.type === 'individual'" class="impact-preview"><span>صافي قديم <MoneyText :value="session?.net_total" /></span><span>صافي جديد <MoneyText :value="correctedNet" /></span><span>دين جديد <MoneyText :value="correctionDebtAmount" /></span></div>
-        <div v-else class="subscription-correction-note">تصحيح جلسة الاشتراك يغيّر الطبيب والعمولة المحفوظة فقط.</div>
+        <div v-else class="subscription-correction-note">تصحيح جلسة الاشتراك يغيّر الطبيب المشرف فقط، ولا ينشئ أو يعدّل أي عمولة.</div>
       </v-card-text>
       <v-card-actions class="dialog-actions"><v-btn variant="text" :disabled="correcting" @click="correctionDialog = false">تراجع</v-btn><v-btn color="primary" data-form-flow-primary :loading="correcting" :disabled="correctionOverAllocated || loadingOptions || Boolean(optionsError)" @click="applyCorrection">تأكيد التصحيح</v-btn></v-card-actions>
     </v-card>
@@ -209,6 +211,7 @@ const formatDate = (value) => value ? new Intl.DateTimeFormat('ar-LY-u-nu-latn',
 .section-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }.sub-value { display: block; margin-top: 4px; color: var(--color-ink-muted); font-size: 13px; }.two-column { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
 .line-list, .totals-list { display: grid; margin-top: 14px; }.line-list > div, .totals-list > div { display: flex; justify-content: space-between; gap: 12px; min-height: 54px; align-items: center; border-top: 1px solid var(--color-hairline); }.line-list > div:first-child { border-top: 0; }.service-description, .service-description span { display: block; }.service-description span { margin-top: 3px; color: var(--color-ink-muted); font-size: 13px; }.service-description .addition-label { width: fit-content; padding: 2px 8px; color: var(--color-primary); border-radius: var(--radius-pill); background: var(--color-info-bg); }.totals-list .net { font-size: 18px; }
 .coverage-heading { display: flex; align-items: center; gap: 10px; margin: 16px 0; color: var(--color-ink-muted); }.commission-box { display: flex; justify-content: space-between; gap: 12px; margin-top: 18px; padding: 14px; color: var(--color-success); border-radius: 12px; background: var(--color-success-bg); }.commission-box :deep(.money-text) { font-size: 19px; font-weight: 600; }.addition-summary { display: grid; gap: 3px; margin-top: 14px; padding: 14px; border-radius: var(--radius-field); background: var(--color-info-bg); }.addition-summary span { color: var(--color-ink-muted); font-size: 13px; }
+.commission-box.historical { color: var(--color-warning); background: var(--color-warning-bg); }
 .lifecycle-card { display: grid; gap: 18px; }.timeline { display: grid; gap: 18px; }.timeline > div { display: flex; gap: 12px; }.timeline-dot { width: 12px; height: 12px; margin-top: 6px; flex: 0 0 12px; border-radius: 50%; background: var(--color-primary); }.timeline-dot.success { background: var(--color-success); }.timeline-dot.danger { background: var(--color-danger); }.timeline-dot.addition { background: var(--color-warning); }.timeline strong, .timeline small { display: block; }.timeline strong { font-weight: 600; }.timeline small { margin-top: 2px; color: var(--color-ink-muted); }
 .dialog-title { padding: 24px 24px 4px; font-size: var(--font-section-size); font-weight: 600; }.correction-body { display: grid; gap: 16px; padding: 12px 24px !important; }.correction-body > p { margin: 0; color: var(--color-ink-muted); }.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }.impact-preview { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }.impact-preview span { display: grid; gap: 4px; padding: 12px; border-radius: 10px; background: var(--color-pearl); }.dialog-actions { gap: 8px; justify-content: flex-end; padding: 12px 24px 24px; }.subscription-correction-note { padding: 14px; color: var(--color-ink-muted); border-radius: 12px; background: var(--color-info-bg); }
 @media (max-width: 800px) { .two-column, .form-grid { grid-template-columns: 1fr; } } @media (max-width: 640px) { .impact-preview { grid-template-columns: 1fr; } }

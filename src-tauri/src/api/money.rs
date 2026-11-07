@@ -23,6 +23,7 @@ pub fn percentage(amount: Decimal, rate: Decimal) -> Decimal {
     round(amount * rate / Decimal::ONE_HUNDRED)
 }
 
+#[cfg(test)]
 pub fn divide(amount: Decimal, divisor: u32) -> Result<Decimal, String> {
     if divisor == 0 {
         return Err("Money divisor must be positive.".to_string());

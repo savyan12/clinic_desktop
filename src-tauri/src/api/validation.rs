@@ -125,21 +125,6 @@ pub fn required_date(data: &Map<String, Value>, field: &str) -> ApiResult<NaiveD
     })
 }
 
-pub fn optional_date(data: &Map<String, Value>, field: &str) -> ApiResult<Option<NaiveDate>> {
-    match data.get(field) {
-        None | Some(Value::Null) => Ok(None),
-        Some(Value::String(value)) if value.is_empty() => Ok(None),
-        Some(Value::String(value)) => NaiveDate::parse_from_str(value, "%Y-%m-%d")
-            .map(Some)
-            .map_err(|_| {
-                ApiError::validation("البيانات المرسلة غير صحيحة.")
-                    .field(field, "صيغة التاريخ غير صحيحة.")
-            }),
-        _ => Err(ApiError::validation("البيانات المرسلة غير صحيحة.")
-            .field(field, "صيغة التاريخ غير صحيحة.")),
-    }
-}
-
 pub fn one_of(value: &str, allowed: &[&str], field: &str) -> ApiResult<()> {
     if allowed.contains(&value) {
         Ok(())

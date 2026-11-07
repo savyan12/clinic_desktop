@@ -361,8 +361,7 @@ async fn list_payments(state: &AppState, query: LedgerQuery) -> ApiResult<Json<V
         AND (? IS NULL OR p.type = ?) AND (? IS NULL OR p.method = ?) \
         AND (? IS NULL OR DATE(p.created_at) >= ?) AND (? IS NULL OR DATE(p.created_at) <= ?) \
         AND (? IS NULL OR EXISTS (SELECT 1 FROM payment_allocations pa JOIN debts d ON d.id = pa.debt_id WHERE pa.payment_id = p.id AND d.sponsor_id = ?) \
-          OR EXISTS (SELECT 1 FROM sessions s WHERE s.id = p.session_id AND s.sponsor_id = ?) \
-          OR EXISTS (SELECT 1 FROM subscriptions sub WHERE sub.id = p.subscription_id AND sub.sponsor_id = ?))";
+          OR EXISTS (SELECT 1 FROM sessions s WHERE s.id = p.session_id AND s.sponsor_id = ?))";
     let count_sql = format!("SELECT CAST(COUNT(*) AS UNSIGNED) {filter}");
     let select_sql = format!("SELECT p.* {filter} ORDER BY p.id DESC LIMIT ? OFFSET ?");
     let mut count = sqlx::query_scalar::<_, u64>(&count_sql);
@@ -401,7 +400,6 @@ fn bind_payment_filters<'q>(
         .bind(filters.sponsor_id)
         .bind(filters.sponsor_id)
         .bind(filters.sponsor_id)
-        .bind(filters.sponsor_id)
 }
 
 fn bind_payment_filters_as<'q>(
@@ -419,7 +417,6 @@ fn bind_payment_filters_as<'q>(
         .bind(filters.from)
         .bind(filters.to)
         .bind(filters.to)
-        .bind(filters.sponsor_id)
         .bind(filters.sponsor_id)
         .bind(filters.sponsor_id)
         .bind(filters.sponsor_id)

@@ -17,7 +17,7 @@ src-tauri/Cargo.lock
 src-tauri/tauri.conf.json
 ```
 
-This repository contains only the desktop application. The retained `backend/` directory is a migration reference and is neither staged nor packaged.
+This repository contains only the Vue/Tauri/Rust desktop application. The retired Laravel source has been removed and is not staged or packaged.
 
 Application release versions come from `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml`; both must agree. The frontend package's `0.0.0` is not the installer version.
 
@@ -109,7 +109,7 @@ The workflow:
 1. Checks out the source, verifies Tauri/Cargo/tag versions and the preinstalled x64 C++ tools/SDK, selects the pinned Rust toolchain, and configures npm/Cargo caches.
 2. Runs **`npm ci`** at the repository root, followed by **`npm run lint`**, **`npm run verify:ui`**, runtime-staging tests, and **`npm run build`**.
 3. Downloads the official MySQL and VC++ packages to runner-temporary storage, verifies pinned SHA-256 values and Microsoft signatures, and authenticates the exact WebView2 payload Tauri will embed.
-4. Calls **`prepare-windows-runtime.ps1`** and verifies the MySQL x64 executables, version, backup tools, VC++ installer, and Tauri resource allowlist. PHP, Composer, Laravel, and the retained backend directory are rejected from release resources.
+4. Calls **`prepare-windows-runtime.ps1`** and verifies the MySQL x64 executables, version, backup tools, VC++ installer, and Tauri resource allowlist. PHP, Composer, Laravel, and any legacy backend runtime directory are rejected from release resources.
 5. Runs **`cargo fmt --check`**, **`cargo check --locked`**, and **`cargo test --locked`**, then the NSIS build. The collector inspects the rendered resource list, x64 architecture, and offline WebView2 payload before calculating the installer SHA-256.
 
 The normal CI Rust suite does not start the bundled Windows MySQL service, exercise installation, perform a Windows restart, or use a physical USB drive. Those remain acceptance items below. Database, API lifecycle, financial, schema-compatibility, and backup/restore integration tests are run locally against isolated MySQL environments during development.

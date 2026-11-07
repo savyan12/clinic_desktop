@@ -1,4 +1,5 @@
 const pad = (value) => String(value).padStart(2, "0");
+const money = (value) => Number(value || 0).toFixed(3);
 
 export function isoDate(offset = 0) {
   const date = new Date();
@@ -185,7 +186,67 @@ export const db = {
   debts: [],
   payments: [],
   paymentAllocations: [],
+  paymentRefundAllocations: [],
   payouts: [],
+  expenses: [
+    {
+      id: 1,
+      type: 'purchase',
+      description: 'مواد تنظيف وتعقيم',
+      recipient: 'شركة الصفاء للتوريد',
+      payment_date: isoDate(-3),
+      amount: '185.500',
+      payment_method: 'cash',
+      reference_number: 'INV-1042',
+      rent_period: null,
+      notes: null,
+      status: 'active',
+      cancelled_at: null,
+      cancelled_by: null,
+      cancel_reason: null,
+      created_by: 1,
+      created_at: isoDateTime(-3, 11, 20),
+      updated_at: isoDateTime(-3, 11, 20),
+    },
+    {
+      id: 2,
+      type: 'rent',
+      description: 'إيجار مقر العيادة',
+      recipient: 'محمد السنوسي',
+      payment_date: isoDate(-12),
+      amount: '2500.000',
+      payment_method: 'transfer',
+      reference_number: 'TR-5581',
+      rent_period: 'نوفمبر 2026',
+      notes: 'دفعة الإيجار الشهرية',
+      status: 'active',
+      cancelled_at: null,
+      cancelled_by: null,
+      cancel_reason: null,
+      created_by: 1,
+      created_at: isoDateTime(-12, 10, 0),
+      updated_at: isoDateTime(-12, 10, 0),
+    },
+    {
+      id: 3,
+      type: 'purchase',
+      description: 'أدوات مكتبية',
+      recipient: 'مكتبة المدينة',
+      payment_date: isoDate(-20),
+      amount: '75.000',
+      payment_method: 'cash',
+      reference_number: null,
+      rent_period: null,
+      notes: null,
+      status: 'cancelled',
+      cancelled_at: isoDateTime(-19, 9, 30),
+      cancelled_by: 1,
+      cancel_reason: 'تسجيل مكرر',
+      created_by: 1,
+      created_at: isoDateTime(-20, 15, 0),
+      updated_at: isoDateTime(-19, 9, 30),
+    },
+  ],
   auditLogs: [],
 };
 
@@ -250,110 +311,80 @@ db.subscriptions = [
   {
     id: 1,
     patient_id: 1,
+    name: "برنامج التأهيل المتكامل",
     service_ids: [1, 2],
     services: serviceSnapshot([1, 2]),
     sessions_count: 10,
     sessions_used: 8,
     remaining: 2,
-    base_total: "1250.000",
-    discount: "100.000",
-    net_total: "1150.000",
-    paid_amount: "800.000",
-    remaining_amount: "350.000",
+    total_price: "1150.000",
     start_date: isoDate(-45),
-    expected_end_date: isoDate(5),
     status: "active",
-    sponsor_id: 1,
   },
   {
     id: 2,
     patient_id: 2,
+    name: "العلاج الطبيعي الأساسي",
     service_ids: [1],
     services: serviceSnapshot([1]),
     sessions_count: 8,
     sessions_used: 7,
     remaining: 1,
-    base_total: "640.000",
-    discount: "40.000",
-    net_total: "600.000",
-    paid_amount: "600.000",
-    remaining_amount: "0.000",
+    total_price: "600.000",
     start_date: isoDate(-40),
-    expected_end_date: isoDate(4),
     status: "active",
-    sponsor_id: null,
   },
   {
     id: 3,
     patient_id: 4,
+    name: "التأهيل والحجامة",
     service_ids: [3, 6],
     services: serviceSnapshot([3, 6]),
     sessions_count: 12,
     sessions_used: 4,
     remaining: 8,
-    base_total: "1200.000",
-    discount: "0.000",
-    net_total: "1200.000",
-    paid_amount: "1200.000",
-    remaining_amount: "0.000",
+    total_price: "1200.000",
     start_date: isoDate(-25),
-    expected_end_date: isoDate(25),
     status: "active",
-    sponsor_id: null,
   },
   {
     id: 4,
     patient_id: 5,
+    name: "برنامج المتابعة القصير",
     service_ids: [4],
     services: serviceSnapshot([4]),
     sessions_count: 6,
     sessions_used: 6,
     remaining: 0,
-    base_total: "570.000",
-    discount: "20.000",
-    net_total: "550.000",
-    paid_amount: "300.000",
-    remaining_amount: "250.000",
+    total_price: "550.000",
     start_date: isoDate(-70),
-    expected_end_date: isoDate(-10),
     status: "completed",
-    sponsor_id: 3,
   },
   {
     id: 5,
     patient_id: 7,
+    name: "برنامج إعادة الحركة",
     service_ids: [1, 3],
     services: serviceSnapshot([1, 3]),
     sessions_count: 10,
     sessions_used: 3,
     remaining: 7,
-    base_total: "1450.000",
-    discount: "150.000",
-    net_total: "1300.000",
-    paid_amount: "650.000",
-    remaining_amount: "650.000",
+    total_price: "1300.000",
     start_date: isoDate(-22),
-    expected_end_date: isoDate(35),
-    status: "stopped",
-    sponsor_id: 1,
+    status: "active",
   },
   {
     id: 6,
     patient_id: 8,
+    name: "برنامج العلاج الكهربائي",
     service_ids: [2],
     services: serviceSnapshot([2]),
     sessions_count: 5,
     sessions_used: 3,
     remaining: 2,
-    base_total: "225.000",
-    discount: "0.000",
-    net_total: "225.000",
-    paid_amount: "225.000",
-    remaining_amount: "0.000",
+    total_price: "225.000",
     start_date: isoDate(-18),
-    expected_end_date: isoDate(8),
     status: "active",
-    sponsor_id: null,
   },
 ];
 
@@ -488,9 +519,9 @@ db.sessions = sessionSeed.map((item, index) => ({
       ? isoDateTime(index < 6 ? 0 : -1, item[6] + 1, item[7])
       : null,
   cancelled_at: item[5] === "cancelled" ? isoDateTime(-1, 13, 20) : null,
-  services_total: item[9],
-  discount: item[10],
-  net_total: item[11],
+  services_total: item[3] === "subscription" ? "0.000" : item[9],
+  discount: item[3] === "subscription" ? "0.000" : item[10],
+  net_total: item[3] === "subscription" ? "0.000" : item[11],
   settlement: {
     coverage: item[8],
     wallet_amount:
@@ -513,11 +544,11 @@ db.sessions = sessionSeed.map((item, index) => ({
   closed_by: item[5] === "closed" ? 2 : null,
   cancel_reason: item[5] === "cancelled" ? "أُلغي بناءً على طلب المريض" : null,
   commission_rate:
-    item[5] === "closed"
+    item[5] === "closed" && item[3] === "individual"
       ? db.doctors.find((doctor) => doctor.id === item[1]).commission_rate
       : null,
   commission_amount:
-    item[5] === "closed"
+    item[5] === "closed" && item[3] === "individual"
       ? (
           (Number(item[11]) *
             Number(
@@ -613,6 +644,32 @@ db.debts = [
     status: "partial",
     created_at: isoDateTime(-90, 9, 0),
   },
+  {
+    id: 5,
+    patient_id: 1,
+    sponsor_id: null,
+    session_id: null,
+    subscription_id: 1,
+    kind: "subscription",
+    amount: "350.000",
+    paid_amount: "0.000",
+    remaining: "350.000",
+    status: "open",
+    created_at: isoDateTime(-45, 10, 0),
+  },
+  {
+    id: 6,
+    patient_id: 7,
+    sponsor_id: null,
+    session_id: null,
+    subscription_id: 5,
+    kind: "subscription",
+    amount: "650.000",
+    paid_amount: "0.000",
+    remaining: "650.000",
+    status: "open",
+    created_at: isoDateTime(-22, 10, 0),
+  },
 ];
 
 db.payments = [
@@ -656,6 +713,16 @@ db.payments = [
   },
   {
     id: 5,
+    patient_id: 1,
+    type: "subscription_payment",
+    method: "cash",
+    amount: "800.000",
+    subscription_id: 1,
+    created_at: isoDateTime(-45, 10, 0),
+    created_by: 2,
+  },
+  {
+    id: 6,
     patient_id: 8,
     type: "refund",
     method: "cash",
@@ -663,6 +730,46 @@ db.payments = [
     created_at: isoDateTime(-4, 16, 0),
     created_by: 1,
     note: "استرجاع يدوي معتمد",
+  },
+  {
+    id: 7,
+    patient_id: 4,
+    type: "subscription_payment",
+    method: "transfer",
+    amount: "1200.000",
+    subscription_id: 3,
+    created_at: isoDateTime(-25, 10, 0),
+    created_by: 2,
+  },
+  {
+    id: 8,
+    patient_id: 5,
+    type: "subscription_payment",
+    method: "cash",
+    amount: "300.000",
+    subscription_id: 4,
+    created_at: isoDateTime(-70, 10, 0),
+    created_by: 2,
+  },
+  {
+    id: 9,
+    patient_id: 7,
+    type: "subscription_payment",
+    method: "cash",
+    amount: "650.000",
+    subscription_id: 5,
+    created_at: isoDateTime(-22, 10, 0),
+    created_by: 2,
+  },
+  {
+    id: 10,
+    patient_id: 8,
+    type: "subscription_payment",
+    method: "cash",
+    amount: "225.000",
+    subscription_id: 6,
+    created_at: isoDateTime(-18, 10, 0),
+    created_by: 2,
   },
 ];
 
@@ -790,13 +897,28 @@ export function hydrateSession(session) {
 }
 
 export function hydrateSubscription(subscription) {
+  const debts = db.debts.filter((item) => item.subscription_id === subscription.id)
+  const directReceived = db.payments
+    .filter((item) => item.subscription_id === subscription.id && item.type === 'subscription_payment' && Number(item.amount) > 0)
+    .reduce((total, item) => total + Number(item.amount), 0)
+  const allocatedReceived = db.paymentAllocations
+    .filter((allocation) => debts.some((debt) => debt.id === allocation.debt_id))
+    .reduce((total, allocation) => total + Number(allocation.amount), 0)
+  const refunded = db.payments
+    .filter((item) => item.subscription_id === subscription.id && item.type === 'refund' && Number(item.amount) < 0)
+    .reduce((total, item) => total + Math.abs(Number(item.amount)), 0)
+  const received = directReceived + allocatedReceived
+  const remaining = Math.max(0, Number(subscription.sessions_count) - Number(subscription.sessions_used))
   return {
     ...subscription,
+    remaining,
+    is_usable: subscription.status === 'active' && remaining > 0,
+    received_amount: money(received),
+    refunded_amount: money(refunded),
+    outstanding_amount: money(subscription.status === 'cancelled' ? 0 : Math.max(0, Number(subscription.total_price) - received)),
+    retained_amount: money(received - refunded),
     patient: hydratePatient(
       db.patients.find((item) => item.id === subscription.patient_id),
     ),
-    sponsor: subscription.sponsor_id
-      ? db.sponsors.find((item) => item.id === subscription.sponsor_id)
-      : null,
   };
 }

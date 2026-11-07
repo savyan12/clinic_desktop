@@ -50,8 +50,7 @@ pub async fn connect_database(
         username: username.to_string(),
         password: password.to_string(),
         commission_base: Default::default(),
-        near_end_sessions: 2,
-        near_end_days: 7,
+        subscription_follow_up_sessions: 2,
     })
     .await
 }

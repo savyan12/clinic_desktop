@@ -10,6 +10,7 @@ import LoginView from '@/views/auth/LoginView.vue'
 import DashboardView from '@/views/dashboard/DashboardView.vue'
 import DoctorDetailsView from '@/views/doctors/DoctorDetailsView.vue'
 import DoctorsView from '@/views/doctors/DoctorsView.vue'
+import ExpensesView from '@/views/expenses/ExpensesView.vue'
 import PatientDetailsView from '@/views/patients/PatientDetailsView.vue'
 import PatientsView from '@/views/patients/PatientsView.vue'
 import PatientStatementPrintView from '@/views/print/PatientStatementPrintView.vue'
@@ -62,6 +63,7 @@ const router = createRouter({
         { path: 'services', name: 'services', component: ServicesView, meta: { title: 'الخدمات', roles: ['admin'] } },
         { path: 'sponsors', name: 'sponsors', component: SponsorsView, meta: { title: 'الجهات الراعية', roles: ['admin'] } },
         { path: 'sponsors/:id', name: 'sponsor-details', component: SponsorDetailsView, meta: { title: 'تفاصيل الجهة الراعية', roles: ['admin'] } },
+        { path: 'expenses', name: 'expenses', component: ExpensesView, meta: { title: 'المشتريات والإيجار', roles: ['admin'] } },
         { path: 'users', name: 'users', component: UsersView, meta: { title: 'المستخدمون', roles: ['admin'] } },
         { path: 'reports/:type?', name: 'reports', component: ReportsView, meta: { title: 'التقارير', roles: ['admin'] } },
         { path: 'audit-log', name: 'audit-log', component: AuditLogView, meta: { title: 'سجل التدقيق', roles: ['admin'] } },

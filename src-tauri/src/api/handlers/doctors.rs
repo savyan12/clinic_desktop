@@ -116,7 +116,7 @@ async fn detail(
     let doctor = fetch(state, id).await?;
     let (count, earned, paid) = period_totals(state, id, query.from, query.to).await?;
     let sessions = sqlx::query_as::<_, SessionRow>(
-        "SELECT * FROM sessions WHERE doctor_id = ? AND status = 'closed' AND (? IS NULL OR DATE(closed_at) >= ?) AND (? IS NULL OR DATE(closed_at) <= ?) ORDER BY closed_at DESC",
+        "SELECT * FROM sessions WHERE doctor_id = ? AND type = 'individual' AND status = 'closed' AND commission_amount IS NOT NULL AND (? IS NULL OR DATE(closed_at) >= ?) AND (? IS NULL OR DATE(closed_at) <= ?) ORDER BY closed_at DESC",
     ).bind(id).bind(query.from).bind(query.from).bind(query.to).bind(query.to).fetch_all(&state.pool).await?;
     let mut session_values = Vec::new();
     for session in &sessions {
@@ -213,7 +213,7 @@ pub async fn payout(
         Box::pin(async move {
             let payout = ledger::doctor_payout(transaction, id, amount, date, &method, note.as_deref(), actor_id).await?;
             let remaining = {
-                let earned = sqlx::query_scalar::<_, Option<Decimal>>("SELECT SUM(commission_amount) FROM sessions WHERE doctor_id = ? AND status = 'closed'").bind(id).fetch_one(&mut **transaction).await?.unwrap_or(Decimal::ZERO);
+                let earned = sqlx::query_scalar::<_, Option<Decimal>>("SELECT SUM(commission_amount) FROM sessions WHERE doctor_id = ? AND type = 'individual' AND status = 'closed' AND commission_amount IS NOT NULL").bind(id).fetch_one(&mut **transaction).await?.unwrap_or(Decimal::ZERO);
                 let paid = sqlx::query_scalar::<_, Option<Decimal>>("SELECT SUM(amount) FROM doctor_payouts WHERE doctor_id = ?").bind(id).fetch_one(&mut **transaction).await?.unwrap_or(Decimal::ZERO);
                 earned - paid
             };
@@ -264,9 +264,9 @@ async fn period_totals(
     from: Option<NaiveDate>,
     to: Option<NaiveDate>,
 ) -> ApiResult<(u64, Decimal, Decimal)> {
-    let count = sqlx::query_scalar::<_, u64>("SELECT CAST(COUNT(*) AS UNSIGNED) FROM sessions WHERE doctor_id = ? AND status = 'closed' AND (? IS NULL OR DATE(closed_at) >= ?) AND (? IS NULL OR DATE(closed_at) <= ?)")
+    let count = sqlx::query_scalar::<_, u64>("SELECT CAST(COUNT(*) AS UNSIGNED) FROM sessions WHERE doctor_id = ? AND type = 'individual' AND status = 'closed' AND commission_amount IS NOT NULL AND (? IS NULL OR DATE(closed_at) >= ?) AND (? IS NULL OR DATE(closed_at) <= ?)")
         .bind(id).bind(from).bind(from).bind(to).bind(to).fetch_one(&state.pool).await?;
-    let earned = sqlx::query_scalar::<_, Option<Decimal>>("SELECT SUM(commission_amount) FROM sessions WHERE doctor_id = ? AND status = 'closed' AND (? IS NULL OR DATE(closed_at) >= ?) AND (? IS NULL OR DATE(closed_at) <= ?)")
+    let earned = sqlx::query_scalar::<_, Option<Decimal>>("SELECT SUM(commission_amount) FROM sessions WHERE doctor_id = ? AND type = 'individual' AND status = 'closed' AND commission_amount IS NOT NULL AND (? IS NULL OR DATE(closed_at) >= ?) AND (? IS NULL OR DATE(closed_at) <= ?)")
         .bind(id).bind(from).bind(from).bind(to).bind(to).fetch_one(&state.pool).await?.unwrap_or(Decimal::ZERO);
     let paid = sqlx::query_scalar::<_, Option<Decimal>>("SELECT SUM(amount) FROM doctor_payouts WHERE doctor_id = ? AND (? IS NULL OR date >= ?) AND (? IS NULL OR date <= ?)")
         .bind(id).bind(from).bind(from).bind(to).bind(to).fetch_one(&state.pool).await?.unwrap_or(Decimal::ZERO);

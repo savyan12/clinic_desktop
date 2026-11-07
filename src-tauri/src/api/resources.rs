@@ -67,6 +67,31 @@ pub fn doctor_value(
     })
 }
 
+pub fn administrative_expense_value(expense: &AdministrativeExpenseRow) -> Value {
+    json!({
+        "id": expense.id,
+        "type": expense.r#type,
+        "description": expense.description,
+        "recipient": expense.recipient,
+        "payment_date": expense.payment_date.format("%Y-%m-%d").to_string(),
+        "amount": money::normalize(expense.amount),
+        "payment_method": expense.payment_method,
+        "reference_number": expense.reference_number,
+        "rent_period": expense.rent_period,
+        "rent_month": expense.rent_month,
+        "rent_start_date": expense.rent_start_date.map(|date| date.format("%Y-%m-%d").to_string()),
+        "rent_end_date": expense.rent_end_date.map(|date| date.format("%Y-%m-%d").to_string()),
+        "notes": expense.notes,
+        "status": expense.status,
+        "cancelled_at": expense.cancelled_at.map(time::iso),
+        "cancelled_by": expense.cancelled_by,
+        "cancel_reason": expense.cancel_reason,
+        "created_by": expense.created_by,
+        "created_at": expense.created_at.map(time::iso),
+        "updated_at": expense.updated_at.map(time::iso),
+    })
+}
+
 pub fn service_value(service: &ServiceRow) -> Value {
     json!({
         "id": service.id,
@@ -83,58 +108,38 @@ pub fn service_value(service: &ServiceRow) -> Value {
 pub fn subscription_value(
     subscription: &SubscriptionRow,
     patient: Option<Value>,
-    sponsor: Option<Value>,
     services: Option<Vec<Value>>,
+    received_amount: Decimal,
+    refunded_amount: Decimal,
 ) -> Value {
-    let today = time::today();
-    let monthly = subscription.plan_type == "monthly";
-    let remaining = (!monthly).then_some(
-        subscription
-            .sessions_count
-            .saturating_sub(subscription.sessions_used),
-    );
-    let remaining_days = if monthly {
-        subscription.end_date.map(|date| {
-            if date < today {
-                0
-            } else {
-                (date - today).num_days() + 1
-            }
-        })
+    let remaining = subscription
+        .sessions_count
+        .saturating_sub(subscription.sessions_used);
+    let outstanding_amount = if subscription.status == "cancelled" {
+        Decimal::ZERO
     } else {
-        None
+        (subscription.total_price - received_amount).max(Decimal::ZERO)
     };
-    let is_usable = if monthly {
-        subscription.status == "active"
-            && subscription.start_date <= today
-            && subscription.end_date.is_some_and(|date| date >= today)
-    } else {
-        subscription.status == "active" && subscription.sessions_used < subscription.sessions_count
-    };
+    let retained_amount = received_amount - refunded_amount;
 
     let mut value = json!({
         "id": subscription.id,
         "patient_id": subscription.patient_id,
-        "plan_type": subscription.plan_type,
+        "name": subscription.name,
         "sessions_count": subscription.sessions_count,
         "sessions_used": subscription.sessions_used,
         "remaining": remaining,
-        "remaining_days": remaining_days,
-        "is_usable": is_usable,
-        "base_total": money::normalize(subscription.base_total),
-        "discount": money::normalize(subscription.discount),
-        "net_total": money::normalize(subscription.net_total),
-        "paid_amount": money::normalize(subscription.paid_amount),
-        "remaining_amount": money::normalize(subscription.net_total - subscription.paid_amount),
+        "is_usable": subscription.status == "active" && remaining > 0,
+        "total_price": money::normalize(subscription.total_price),
+        "received_amount": money::normalize(received_amount),
+        "refunded_amount": money::normalize(refunded_amount),
+        "outstanding_amount": money::normalize(outstanding_amount),
+        "retained_amount": money::normalize(retained_amount),
         "start_date": subscription.start_date.format("%Y-%m-%d").to_string(),
-        "expected_end_date": subscription.expected_end_date.map(|date| date.format("%Y-%m-%d").to_string()),
-        "end_date": subscription.end_date.map(|date| date.format("%Y-%m-%d").to_string()),
         "status": subscription.status,
         "cancelled_at": subscription.cancelled_at.map(time::iso),
         "cancelled_by": subscription.cancelled_by,
         "cancel_reason": subscription.cancel_reason,
-        "refund_amount": money::normalize(subscription.refund_amount),
-        "sponsor_id": subscription.sponsor_id,
         "created_by": subscription.created_by,
     });
     let object = value
@@ -142,9 +147,6 @@ pub fn subscription_value(
         .expect("subscription resource must be an object");
     if let Some(patient) = patient {
         object.insert("patient".into(), patient);
-    }
-    if let Some(sponsor) = sponsor {
-        object.insert("sponsor".into(), sponsor);
     }
     if let Some(services) = services {
         object.insert("services".into(), Value::Array(services));
@@ -156,7 +158,6 @@ pub fn subscription_service_value(service: &SubscriptionServiceRow) -> Value {
     json!({
         "service_id": service.service_id,
         "name": service.service_name,
-        "price": money::normalize(service.price),
     })
 }
 

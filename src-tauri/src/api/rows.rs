@@ -69,22 +69,15 @@ pub struct ServiceRow {
 pub struct SubscriptionRow {
     pub id: u64,
     pub patient_id: u64,
-    pub sponsor_id: Option<u64>,
-    pub plan_type: String,
+    pub name: String,
     pub sessions_count: u32,
     pub sessions_used: u32,
-    pub base_total: Decimal,
-    pub discount: Decimal,
-    pub net_total: Decimal,
-    pub paid_amount: Decimal,
+    pub total_price: Decimal,
     pub start_date: NaiveDate,
-    pub expected_end_date: Option<NaiveDate>,
-    pub end_date: Option<NaiveDate>,
     pub status: String,
     pub cancelled_at: Option<DateTime<Utc>>,
     pub cancelled_by: Option<u64>,
     pub cancel_reason: Option<String>,
-    pub refund_amount: Decimal,
     pub created_by: u64,
 }
 
@@ -92,7 +85,6 @@ pub struct SubscriptionRow {
 pub struct SubscriptionServiceRow {
     pub service_id: u64,
     pub service_name: String,
-    pub price: Decimal,
 }
 
 #[derive(Debug, Clone, FromRow)]
@@ -239,6 +231,30 @@ pub struct DoctorPayoutRow {
     pub note: Option<String>,
     pub created_by: u64,
     pub created_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, FromRow)]
+pub struct AdministrativeExpenseRow {
+    pub id: u64,
+    pub r#type: String,
+    pub description: String,
+    pub recipient: String,
+    pub payment_date: NaiveDate,
+    pub amount: Decimal,
+    pub payment_method: String,
+    pub reference_number: Option<String>,
+    pub rent_period: Option<String>,
+    pub rent_month: Option<String>,
+    pub rent_start_date: Option<NaiveDate>,
+    pub rent_end_date: Option<NaiveDate>,
+    pub notes: Option<String>,
+    pub status: String,
+    pub cancelled_at: Option<DateTime<Utc>>,
+    pub cancelled_by: Option<u64>,
+    pub cancel_reason: Option<String>,
+    pub created_by: u64,
+    pub created_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, FromRow)]
