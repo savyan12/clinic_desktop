@@ -51,7 +51,7 @@ pub async fn index(
     let to = (!receptionist_today).then_some(query.to).flatten();
     let filter = "FROM sessions s INNER JOIN patients p ON p.id = s.patient_id \
         WHERE (? = 0 OR DATE(s.opened_at) = CURDATE()) \
-          AND (? = '' OR p.name LIKE ? OR p.phone LIKE ?) \
+          AND (? = '' OR p.name LIKE ? OR p.phone LIKE ? OR s.code LIKE ?) \
           AND (? IS NULL OR s.doctor_id = ?) \
           AND (? = '' OR s.status = ?) \
           AND (? IS NULL OR DATE(s.opened_at) = ?) \
@@ -63,6 +63,7 @@ pub async fn index(
     let total = sqlx::query_scalar::<_, u64>(&count_sql)
         .bind(receptionist_today)
         .bind(search)
+        .bind(&pattern)
         .bind(&pattern)
         .bind(&pattern)
         .bind(query.doctor_id)
@@ -80,6 +81,7 @@ pub async fn index(
     let rows = sqlx::query_as::<_, SessionRow>(&select_sql)
         .bind(receptionist_today)
         .bind(search)
+        .bind(&pattern)
         .bind(&pattern)
         .bind(&pattern)
         .bind(query.doctor_id)

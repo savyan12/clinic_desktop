@@ -703,6 +703,10 @@ mod tests {
                     "INSERT INTO {database}.patients \
                      (name, phone, age, gender, is_active, created_by, created_at, updated_at) \
                      SELECT 'المريض الأصلي', '0911111111', 35, 'male', 1, id, NOW(), NOW() \
+                     FROM {database}.users ORDER BY id LIMIT 1; \
+                     INSERT INTO {database}.administrative_expenses \
+                     (`type`, description, recipient, payment_date, amount, payment_method, status, created_by, created_at, updated_at) \
+                     SELECT 'purchase', 'مصروف النسخة الأصلي', 'مورد الاختبار', CURDATE(), 75, 'cash', 'active', id, NOW(), NOW() \
                      FROM {database}.users ORDER BY id LIMIT 1"
                 ),
             ],
@@ -730,7 +734,8 @@ mod tests {
                 "-e".into(),
                 format!(
                     "UPDATE {database}.patients SET name = 'المريض المعدل'; \
-                     UPDATE {database}.settings SET clinic_name = 'عيادة معدلة بعد النسخ'"
+                     UPDATE {database}.settings SET clinic_name = 'عيادة معدلة بعد النسخ'; \
+                     UPDATE {database}.administrative_expenses SET description = 'مصروف معدل بعد النسخ'"
                 ),
             ],
         )
@@ -749,15 +754,16 @@ mod tests {
                 "--default-character-set=utf8mb4".into(),
                 "-e".into(),
                 format!(
-                    "SELECT CONCAT(p.name, '|', s.clinic_name) \
-                     FROM {database}.patients p CROSS JOIN {database}.settings s LIMIT 1"
+                    "SELECT CONCAT(p.name, '|', s.clinic_name, '|', e.description) \
+                     FROM {database}.patients p CROSS JOIN {database}.settings s \
+                     CROSS JOIN {database}.administrative_expenses e LIMIT 1"
                 ),
             ],
         )
         .expect("read restored data");
         assert_eq!(
             String::from_utf8_lossy(&output.stdout).trim(),
-            "المريض الأصلي|عيادة النسخ الأصلية"
+            "المريض الأصلي|عيادة النسخ الأصلية|مصروف النسخة الأصلي"
         );
     }
 

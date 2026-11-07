@@ -118,6 +118,12 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/payments", get(handlers::financial::payments_index))
         .route("/refunds", post(handlers::financial::refund))
+        .route(
+            "/expenses",
+            get(handlers::expenses::index).post(handlers::expenses::store),
+        )
+        .route("/expenses/{id}/correct", post(handlers::expenses::correct))
+        .route("/expenses/{id}/cancel", post(handlers::expenses::cancel))
         .route("/reports/{type}", get(handlers::reports::show))
         .route("/reports/{type}/export", get(handlers::reports::export))
         .route("/audit-log", get(handlers::audit_log::index))
@@ -146,14 +152,6 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/subscriptions/{id}/usage",
             get(handlers::subscriptions::usage),
-        )
-        .route(
-            "/subscriptions/{id}/stop",
-            post(handlers::subscriptions::stop),
-        )
-        .route(
-            "/subscriptions/{id}/reactivate",
-            post(handlers::subscriptions::reactivate),
         )
         .route(
             "/subscriptions/{id}/cancel-preview",

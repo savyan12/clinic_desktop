@@ -24,11 +24,11 @@
               <InlineError v-else-if="patientError" :message="patientError" retry @retry="loadPatient(form.patient_id)" />
               <div v-else-if="patientDetails" class="account-summary">
                 <div class="summary-head"><h4>ملخص حساب {{ patientDetails.name }}</h4><span>{{ patientDetails.area || 'لا يوجد عنوان مسجل' }}</span></div>
-                <div class="summary-grid">
-                  <div><span>اشتراكات صالحة</span><strong>{{ activeSubscriptions.length }}</strong></div>
-                  <div><span>الرصيد المتاح</span><MoneyText :value="patientDetails.wallet_balance" /></div>
-                  <div><span>الديون القائمة</span><MoneyText :value="patientDetails.debt_total" /></div>
-                  <div><span>الجهة الراعية</span><strong>{{ patientDetails.sponsor?.name || 'لا توجد' }}</strong></div>
+                <div class="summary-grid" dir="rtl">
+                  <div class="summary-item"><span>اشتراكات صالحة</span><strong>{{ activeSubscriptions.length }}</strong></div>
+                  <div class="summary-item"><span>الرصيد المتاح</span><MoneyText :value="patientDetails.wallet_balance" /></div>
+                  <div class="summary-item"><span>الديون القائمة</span><MoneyText :value="patientDetails.debt_total" /></div>
+                  <div class="summary-item"><span>الجهة الراعية</span><strong>{{ patientDetails.sponsor?.name || 'لا توجد' }}</strong></div>
                 </div>
                 <div v-if="activeSubscriptions.length" class="subscription-preview">
                   <div v-for="subscription in activeSubscriptions" :key="subscription.id">
@@ -36,7 +36,6 @@
                     <strong>{{ subscriptionValidity(subscription) }}</strong>
                   </div>
                 </div>
-                <div v-if="unavailableMonthlySubscriptions.length" class="subscription-day-warning"><v-icon icon="mdi-calendar-alert-outline" /><span>يوجد اشتراك شهري غير متاح اليوم لأن اليوم خارج المدة أو ليس من أيام الحضور المحددة.</span></div>
               </div>
             </section>
           </v-window-item>
@@ -49,19 +48,20 @@
                 <v-btn value="subscription" prepend-icon="mdi-wallet-membership">مغطاة باشتراك</v-btn>
               </v-btn-toggle>
               <v-select v-model="form.doctor_id" label="الطبيب المسؤول" :items="activeDoctors" item-title="name" item-value="id" :loading="loadingOptions" :disabled="loadingOptions || Boolean(optionsError)" :error-messages="errors.doctor_id" />
+              <v-text-field v-model="form.session_date" label="تاريخ الجلسة" type="date" :error-messages="errors.session_date" />
               <v-select v-if="form.type === 'subscription'" v-model="form.subscription_id" label="الاشتراك" :items="activeSubscriptions" :item-title="subscriptionTitle" item-value="id" :error-messages="errors.subscription_id" />
 
               <template v-if="canChooseServices">
-                <v-select v-model="form.service_ids" label="الخدمات المقدمة في هذه الجلسة" :items="activeServices" item-title="name" item-value="id" multiple chips closable-chips :loading="loadingOptions" :disabled="loadingOptions || Boolean(optionsError)" :error-messages="errors.service_ids || errors.services" />
+                <v-select v-model="form.service_ids" :label="form.type === 'subscription' ? 'الخدمات المغطاة المقدمة في الجلسة' : 'الخدمات المقدمة في هذه الجلسة'" :items="availableServices" item-title="name" item-value="id" multiple chips closable-chips :loading="loadingOptions" :disabled="loadingOptions || Boolean(optionsError)" :error-messages="errors.service_ids || errors.services" />
                 <div v-if="selectedServices.length" class="service-lines">
                   <div v-for="service in selectedServices" :key="service.id" class="service-line">
                     <div class="service-copy">
                       <strong>{{ service.name }}</strong>
-                      <span>السعر الأساسي <MoneyText :value="service.price" /></span>
-                      <span v-if="service.included_units">يشمل {{ service.included_units }} {{ service.unit_name || 'وحدة' }}</span>
+                      <span v-if="form.type === 'individual'">السعر الأساسي <MoneyText :value="service.price" /></span>
+                      <span v-if="form.type === 'individual' && service.included_units">يشمل {{ service.included_units }} {{ service.unit_name || 'وحدة' }}</span>
                     </div>
                     <v-text-field
-                      v-if="service.extra_unit_price !== null"
+                      v-if="form.type === 'individual' && service.extra_unit_price !== null"
                       v-model.number="extraUnits[service.id]"
                       :label="(service.unit_name || 'وحدة') + ' إضافية'"
                       type="number"
@@ -70,15 +70,11 @@
                       :hint="extraHint(service)"
                       persistent-hint
                     />
-                    <MoneyText :value="serviceTotal(service)" />
+                    <MoneyText v-if="form.type === 'individual'" :value="serviceTotal(service)" />
+                    <span v-else class="covered-label">مغطاة بالاشتراك</span>
                   </div>
                 </div>
               </template>
-
-              <div v-else-if="selectedSubscription" class="locked-services">
-                <div class="locked-title"><v-icon icon="mdi-lock-outline" /><span>اشتراك قديم محفوظ بعدد جلسات؛ خدماته التاريخية ثابتة.</span></div>
-                <div v-for="service in selectedSubscription.services" :key="service.service_id" class="locked-row"><span>{{ service.name }}</span><MoneyText :value="service.price" /></div>
-              </div>
 
               <v-text-field v-if="form.type === 'individual'" v-model="form.discount" label="خصم ثابت" type="text" inputmode="decimal" suffix="د.ل" :error-messages="errors.discount" />
             </section>
@@ -139,11 +135,11 @@ import MoneyText from '@/components/common/MoneyText.vue'
 import PatientAutocomplete from '@/components/common/PatientAutocomplete.vue'
 import StatusChip from '@/components/common/StatusChip.vue'
 import { paymentMethods } from '@/constants/labels'
-import { formatSubscriptionSchedule } from '@/constants/subscriptions'
 import { decimal, formatMoney, numeric } from '@/composables/useMoney'
 import { useIdempotency } from '@/composables/useIdempotency'
 import { useDialogOptions } from '@/composables/useDialogOptions'
 import { useUiStore } from '@/stores/ui'
+import { clinicDate } from '@/utils/date'
 
 const props = defineProps({ modelValue: Boolean, initialPatientId: { type: [Number, String], default: null }, initialPatient: { type: Object, default: null } })
 const emit = defineEmits(['update:modelValue', 'saved'])
@@ -169,21 +165,22 @@ const doctors = computed(() => options.value?.doctors || [])
 const services = computed(() => options.value?.services || [])
 const sponsors = computed(() => options.value?.sponsors || [])
 const patientDialog = ref(false)
-const initialForm = () => ({ patient_id: props.initialPatientId ? Number(props.initialPatientId) : null, type: 'individual', doctor_id: null, subscription_id: null, service_ids: [], discount: 0, wallet_amount: 0, paid_amount: 0, method: 'cash', sponsor_id: null })
+const initialForm = () => ({ patient_id: props.initialPatientId ? Number(props.initialPatientId) : null, type: 'individual', doctor_id: null, session_date: clinicDate(), subscription_id: null, service_ids: [], discount: 0, wallet_amount: 0, paid_amount: 0, method: 'cash', sponsor_id: null })
 const form = reactive(initialForm())
 
 const activeDoctors = computed(() => doctors.value.filter((item) => item.is_active))
 const activeServices = computed(() => services.value.filter((item) => item.is_active))
-const activeSubscriptions = computed(() => patientDetails.value?.subscriptions?.filter((item) => item.status === 'active' && item.is_usable !== false && (item.plan_type === 'monthly' || item.remaining > 0)) || [])
-const unavailableMonthlySubscriptions = computed(() => patientDetails.value?.subscriptions?.filter((item) => item.plan_type === 'monthly' && item.status === 'active' && item.is_usable === false) || [])
+const activeSubscriptions = computed(() => patientDetails.value?.subscriptions?.filter((item) => item.status === 'active' && item.is_usable !== false && item.remaining > 0) || [])
 const selectedSubscription = computed(() => activeSubscriptions.value.find((item) => item.id === Number(form.subscription_id)) || null)
-const monthlySubscription = computed(() => selectedSubscription.value?.plan_type === 'monthly')
-const canChooseServices = computed(() => form.type === 'individual' || monthlySubscription.value)
-const selectedServices = computed(() => activeServices.value.filter((item) => form.service_ids.map(Number).includes(item.id)))
+const canChooseServices = computed(() => true)
+const availableServices = computed(() => {
+  if (form.type !== 'subscription') return activeServices.value
+  const coveredIds = new Set((selectedSubscription.value?.services || []).map((service) => Number(service.service_id)))
+  return activeServices.value.filter((service) => coveredIds.has(Number(service.id)))
+})
+const selectedServices = computed(() => availableServices.value.filter((item) => form.service_ids.map(Number).includes(Number(item.id))))
 const servicesTotal = computed(() => {
-  if (form.type === 'subscription' && selectedSubscription.value && !monthlySubscription.value) {
-    return numeric(selectedSubscription.value.net_total) / Number(selectedSubscription.value.sessions_count)
-  }
+  if (form.type === 'subscription') return 0
   return selectedServices.value.reduce((total, service) => total + numeric(serviceTotal(service)), 0)
 })
 const discount = computed(() => form.type === 'subscription' ? 0 : Math.max(0, Math.min(numeric(form.discount), servicesTotal.value)))
@@ -248,12 +245,12 @@ watch(netTotal, (value, previous) => {
 })
 
 function clearErrors() { Object.keys(errors).forEach((name) => delete errors[name]) }
-function subscriptionTitle(item) { return item.plan_type === 'monthly' ? 'اشتراك شهري — ' + formatSubscriptionSchedule(item.scheduled_weekdays) + ' — حتى ' + formatDate(item.end_date) : item.services.map((service) => service.name).join(' + ') + ' — متبقي ' + item.remaining }
-function subscriptionSummary(item) { return item.plan_type === 'monthly' ? 'اشتراك شهري · ' + formatSubscriptionSchedule(item.scheduled_weekdays) : item.services.map((service) => service.name).join(' + ') }
-function subscriptionValidity(item) { return item.plan_type === 'monthly' ? 'ينتهي ' + formatDate(item.end_date) : 'متبقي ' + item.remaining + ' من ' + item.sessions_count }
+function subscriptionTitle(item) { return item.name + ' — متبقي ' + item.remaining }
+function subscriptionSummary(item) { return item.name + ' · ' + item.services.map((service) => service.name).join(' + ') }
+function subscriptionValidity(item) { return 'متبقي ' + item.remaining + ' من ' + item.sessions_count }
 function serviceTotal(service) { return decimal(numeric(service.price) + numeric(service.extra_unit_price) * Math.max(0, Number(extraUnits[service.id] || 0))) }
 function extraHint(service) { return 'سعر الواحدة ' + formatMoney(service.extra_unit_price) }
-function servicePayload() { return selectedServices.value.map((service) => ({ service_id: service.id, item_type: 'service', extra_units: Math.max(0, Number(extraUnits[service.id] || 0)) })) }
+function servicePayload() { return selectedServices.value.map((service) => ({ service_id: service.id, item_type: 'service', extra_units: form.type === 'subscription' ? 0 : Math.max(0, Number(extraUnits[service.id] || 0)) })) }
 async function loadPatient(id) {
   patientRequest?.abort()
   patientDetails.value = null
@@ -301,6 +298,7 @@ async function save() {
     const payload = {
       patient_id: form.patient_id,
       doctor_id: form.doctor_id,
+      session_date: form.session_date,
       type: form.type,
       subscription_id: form.type === 'subscription' ? form.subscription_id : null,
       ...(canChooseServices.value ? { services: servicePayload() } : {}),
@@ -329,7 +327,6 @@ async function save() {
   }
 }
 
-const formatDate = (value) => value ? new Intl.DateTimeFormat('ar-LY-u-nu-latn', { dateStyle: 'medium' }).format(new Date(value + 'T00:00:00')) : '—'
 </script>
 
 <style scoped>
@@ -339,11 +336,11 @@ const formatDate = (value) => value ? new Intl.DateTimeFormat('ar-LY-u-nu-latn',
 .step-indicator { display: grid; grid-template-columns: repeat(3, 1fr); padding: 16px 24px; border-bottom: 1px solid var(--color-hairline); background: var(--color-pearl); }
 .step-indicator button { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; color: var(--color-ink-muted); border: 0; background: transparent; cursor: pointer; }.step-indicator button span { width: 26px; height: 26px; display: grid; place-items: center; border: 1px solid var(--color-hairline); border-radius: 50%; background: var(--color-canvas); }.step-indicator button.active { color: var(--color-primary); font-weight: 600; }.step-indicator button.active span, .step-indicator button.complete span { color: white; border-color: var(--color-primary); background: var(--color-primary); }
 .dialog-body { min-height: 0; scrollbar-gutter: stable; padding: 24px !important; }.step-section { display: grid; gap: 20px; }.step-section h3 { margin: 0; font-size: var(--font-section-size); font-weight: var(--font-section-weight); }.step-section p { margin: 4px 0 0; color: var(--color-ink-muted); }
-.account-summary, .locked-services, .financial-summary { border: 1px solid var(--color-hairline); border-radius: 14px; overflow: hidden; }.summary-head { display: flex; justify-content: space-between; gap: 12px; padding: 16px; background: var(--color-pearl); }.summary-head h4 { margin: 0; font-weight: 600; }.summary-head span { color: var(--color-ink-muted); }.summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); }.summary-grid div { padding: 16px; border-inline-start: 1px solid var(--color-hairline); }.summary-grid span, .summary-grid strong { display: block; }.summary-grid span { color: var(--color-ink-muted); font-size: 13px; }.summary-grid strong { margin-top: 4px; font-weight: 600; }.subscription-preview { display: grid; gap: 1px; background: var(--color-hairline); }.subscription-preview div { display: flex; justify-content: space-between; gap: 12px; padding: 12px 16px; background: var(--color-canvas); font-size: 14px; }.subscription-preview strong { color: var(--color-primary); font-weight: 600; }
+.account-summary, .locked-services, .financial-summary { border: 1px solid var(--color-hairline); border-radius: 14px; overflow: hidden; }.summary-head { display: flex; justify-content: space-between; gap: 12px; padding: 16px; text-align: right; background: var(--color-pearl); }.summary-head h4 { margin: 0; font-weight: 600; }.summary-head span { color: var(--color-ink-muted); }.summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); direction: rtl; }.summary-item { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; padding: 16px; direction: rtl; text-align: right; border-inline-start: 1px solid var(--color-hairline); }.summary-item:first-child { border-inline-start: 0; }.summary-item span, .summary-item strong { display: block; width: 100%; text-align: right; }.summary-item span { color: var(--color-ink-muted); font-size: 13px; }.summary-item strong { margin-top: 4px; font-weight: 600; }.summary-item :deep(.money-text) { display: block; width: 100%; margin-top: 4px; text-align: right; }.subscription-preview { display: grid; gap: 1px; direction: rtl; background: var(--color-hairline); }.subscription-preview div { display: flex; justify-content: space-between; gap: 12px; padding: 12px 16px; text-align: right; background: var(--color-canvas); font-size: 14px; }.subscription-preview strong { color: var(--color-primary); font-weight: 600; }
 .type-toggle { width: fit-content; }.locked-title, .locked-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 16px; }.locked-title { justify-content: flex-start; color: var(--color-primary); background: var(--color-info-bg); }.locked-row { border-top: 1px solid var(--color-hairline); }
 .service-lines { display: grid; gap: 1px; overflow: hidden; border: 1px solid var(--color-hairline); border-radius: var(--radius-field); background: var(--color-hairline); }.service-line { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(180px, .7fr) auto; align-items: center; gap: 16px; padding: 14px 16px; background: var(--color-canvas); }.service-copy, .service-copy span { display: block; }.service-copy span { margin-top: 3px; color: var(--color-ink-muted); font-size: 13px; }
 .settlement-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }.wallet-warning { display: flex; align-items: center; gap: 8px; padding: 12px 14px; color: var(--color-danger); border: 1px solid var(--color-danger-border); border-radius: var(--radius-field); background: var(--color-danger-bg); }
-.subscription-day-warning { display: flex; align-items: flex-start; gap: 8px; padding: 12px 14px; color: var(--color-warning); border-radius: var(--radius-field); background: var(--color-warning-bg); font-size: 13px; }
+.covered-label { color: var(--color-primary); font-weight: 600; }
 .financial-summary { display: grid; grid-template-columns: repeat(3, 1fr); }.financial-summary div { display: flex; flex-direction: column; gap: 4px; padding: 16px; border-inline-start: 1px solid var(--color-hairline); border-top: 1px solid var(--color-hairline); }.financial-summary span { color: var(--color-ink-muted); font-size: 13px; }.financial-summary :deep(.money-text) { font-size: 19px; font-weight: 600; }.summary-net { background: var(--color-info-bg); }.coverage-note { display: flex; align-items: center; gap: 10px; color: var(--color-ink-muted); }.dialog-actions { gap: 8px; padding: 14px 24px 22px; border-top: 1px solid var(--color-hairline); }
 @media (max-width: 760px) { .summary-grid, .financial-summary { grid-template-columns: repeat(2, 1fr); }.service-line { grid-template-columns: 1fr; }.settlement-grid { grid-template-columns: 1fr; } } @media (max-width: 560px) { .step-indicator { padding-inline: 8px; }.step-indicator button { font-size: 12px; }.summary-grid, .financial-summary { grid-template-columns: 1fr; } }
 </style>

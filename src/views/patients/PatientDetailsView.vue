@@ -58,9 +58,9 @@
             <div class="section-row"><h2 class="section-heading">الاشتراكات</h2><v-btn color="primary" variant="text" prepend-icon="mdi-plus" @click="subscriptionDialog = true">اشتراك جديد</v-btn></div>
             <div v-if="patient.subscriptions.length" class="subscription-cards">
               <router-link v-for="item in patient.subscriptions" :key="item.id" :to="`/subscriptions/${item.id}`" class="subscription-card">
-                <div class="section-row"><strong>{{ item.plan_type === 'monthly' ? 'اشتراك شهري' : item.services.map((service) => service.name).join(' + ') }}</strong><StatusChip type="subscription" :value="item.status" /></div>
-                <div v-if="item.plan_type !== 'monthly'" class="usage-track"><span :style="{ width: `${item.sessions_count ? (item.sessions_used / item.sessions_count) * 100 : 0}%` }"></span></div>
-                <div class="subscription-meta"><template v-if="item.plan_type === 'monthly'"><span>{{ formatDateOnly(item.start_date) }}</span><span>إلى {{ formatDateOnly(item.end_date) }}</span></template><template v-else><span>{{ item.sessions_used }} مستخدمة</span><span>{{ item.remaining }} متبقية</span></template><MoneyText :value="item.net_total" /></div>
+                <div class="section-row"><strong>{{ item.name }} — {{ item.services.map((service) => service.name).join(' + ') }}</strong><StatusChip type="subscription" :value="item.status" /></div>
+                <div class="usage-track"><span :style="{ width: `${item.sessions_count ? (item.sessions_used / item.sessions_count) * 100 : 0}%` }"></span></div>
+                <div class="subscription-meta"><span>{{ item.sessions_used }} مستخدمة</span><span>{{ item.remaining }} متبقية</span><MoneyText :value="item.total_price" /></div>
               </router-link>
             </div>
             <EmptyState v-else icon="mdi-wallet-membership" title="لا توجد اشتراكات" description="يمكن إنشاء أكثر من اشتراك للمريض." />
@@ -150,7 +150,6 @@ const walletLabel = (movement) => movement.type === 'debit' && movement.payment_
   : ({ topup: 'شحن', debit: 'خصم جلسة', reversal: 'إعادة رصيد' }[movement.type] || movement.type)
 const debtKind = (kind) => ({ session: 'جلسة', subscription: 'اشتراك', opening: 'افتتاحي' }[kind] || kind)
 const paymentLabel = (type) => ({ wallet_topup: 'شحن رصيد', session_payment: 'دفعة جلسة', subscription_payment: 'دفعة اشتراك', debt_payment: 'تسديد دين', refund: 'استرجاع' }[type] || type)
-const formatDateOnly = (value) => value ? new Intl.DateTimeFormat('ar-LY-u-nu-latn', { dateStyle: 'medium' }).format(new Date(`${value}T00:00:00`)) : '—'
 </script>
 
 <style scoped>

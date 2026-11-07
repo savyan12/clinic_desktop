@@ -2,10 +2,11 @@ export const labels = {
   roles: { admin: 'مدير النظام', receptionist: 'موظف استقبال' },
   sessionStatus: { open: 'مفتوحة', closed: 'مغلقة', cancelled: 'ملغاة' },
   sessionType: { individual: 'فردية', subscription: 'اشتراك' },
-  subscriptionStatus: { active: 'نشط', completed: 'مكتمل', stopped: 'موقوف', cancelled: 'ملغي' },
-  subscriptionPlan: { monthly: 'شهري', legacy_package: 'حزمة جلسات' },
+  subscriptionStatus: { active: 'نشط', completed: 'مكتمل', cancelled: 'ملغي' },
   debtStatus: { open: 'مفتوح', partial: 'جزئي', paid: 'مسدد', void: 'ملغى' },
   debtKind: { session: 'جلسة', subscription: 'اشتراك', opening: 'افتتاحي' },
+  expenseType: { purchase: 'مشتريات', rent: 'إيجار' },
+  expenseStatus: { active: 'نشط', cancelled: 'ملغي' },
   paymentType: {
     session_payment: 'دفعة جلسة',
     subscription_payment: 'دفعة اشتراك',
@@ -34,4 +35,9 @@ export function labelFor(group, value) {
 export const paymentMethods = [
   { title: 'نقداً', value: 'cash' },
   { title: 'تحويل مصرفي', value: 'transfer' },
+]
+
+export const expenseTypes = [
+  { title: 'مشتريات', value: 'purchase' },
+  { title: 'إيجار', value: 'rent' },
 ]

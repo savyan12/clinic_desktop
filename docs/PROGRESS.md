@@ -3,7 +3,7 @@
 ## Current state
 
 - The desktop edition now runs Vue inside Tauri, starts a private loopback MySQL 8 instance, and serves `/api/v1` from the embedded Rust process using Axum and SQLx.
-- PHP, Composer, and Laravel are not required or packaged at runtime. The existing `backend/` directory remains intact as a rollback/reference implementation until Windows acceptance is complete.
+- PHP, Composer, and Laravel are not required or packaged at runtime. The retired Laravel source has been removed from this desktop repository.
 - The Rust backend preserves the existing MySQL schema and migration names, customer data, Sanctum-compatible bearer tokens, bcrypt passwords, decimal money precision, row locking, financial ledgers, audit logs, idempotency records, Arabic errors, role rules, and frontend API contract.
 - Operational data belongs to the daily Windows user. Verified backup and first-activation restore remain mandatory parts of delivery.
 - Desktop migration implementation is complete. The remaining release gate is Windows packaging and acceptance, not missing backend functionality.
@@ -50,10 +50,10 @@
 
 ## Decisions
 
-- RUST-01: Implement the desktop API inside the existing Rust/Tauri package with Axum + SQLx/MySQL, while retaining `backend/` as a non-packaged rollback/reference implementation through final Windows acceptance.
+- RUST-01: Implement the desktop API inside the existing Rust/Tauri package with Axum + SQLx/MySQL. The legacy Laravel reference was removed after confirming that the desktop runtime is independent.
 - RUST-02: Keep the existing MySQL engine and business tables unchanged. Continue using Laravel's existing `migrations` table and migration names so no second migration-history schema is introduced.
 - RUST-03: Preserve Sanctum token storage/format compatibility and existing password hashes across the cutover.
-- RUST-04: Package only the compiled Rust API; do not delete the retained Laravel source during the safe migration period.
+- RUST-04: Package only the compiled Rust API; PHP, Composer, and Laravel source are not part of the desktop repository.
 - RUST-05: Match Laravel's three-attempt database transaction retry behavior for MySQL deadlocks and lock timeouts.
 - DOC-01: Keep desktop delivery documentation inside this standalone repository's `docs/` directory; sibling web applications remain separate and unchanged.
 - DOC-02: Treat hardware figures as planning recommendations, not benchmarked minimums, and distinguish bundled customer runtimes from developer build tools.

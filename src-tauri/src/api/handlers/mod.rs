@@ -2,6 +2,7 @@ pub mod audit_log;
 pub mod auth;
 pub mod dashboard;
 pub mod doctors;
+pub mod expenses;
 pub mod financial;
 pub mod patients;
 pub mod reports;

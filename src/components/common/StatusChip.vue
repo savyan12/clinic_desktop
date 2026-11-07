@@ -17,14 +17,16 @@ const label = computed(() => {
   const group = props.type === 'session' ? 'sessionStatus'
     : props.type === 'subscription' ? 'subscriptionStatus'
       : props.type === 'debt' ? 'debtStatus'
+        : props.type === 'expense' ? 'expenseStatus'
         : props.type === 'coverage' ? 'coverage' : 'active'
   return labelFor(group, props.value)
 })
 
 const tone = computed(() => {
   if (props.type === 'session') return { open: 'info', closed: 'success', cancelled: 'danger' }[props.value] || 'neutral'
-  if (props.type === 'subscription') return { active: 'success', completed: 'neutral', stopped: 'warning', cancelled: 'danger' }[props.value] || 'neutral'
+  if (props.type === 'subscription') return { active: 'success', completed: 'neutral', cancelled: 'danger' }[props.value] || 'neutral'
   if (props.type === 'debt') return { open: 'warning', partial: 'info', paid: 'success', void: 'neutral' }[props.value] || 'neutral'
+  if (props.type === 'expense') return { active: 'success', cancelled: 'danger' }[props.value] || 'neutral'
   if (props.type === 'active') return props.value ? 'success' : 'neutral'
   return 'outline'
 })

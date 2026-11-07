@@ -15,16 +15,17 @@
     <section class="surface-card report-filters" data-form-flow-filter>
       <v-text-field v-model="filters.from" label="من تاريخ" type="date" />
       <v-text-field v-model="filters.to" label="إلى تاريخ" type="date" />
-      <v-select v-if="['sessions', 'doctor-dues'].includes(type)" v-model="filters.doctor_id" label="الطبيب" :items="doctors" item-title="name" item-value="id" clearable :loading="loadingFilters" />
+      <v-select v-if="['sessions', 'doctor-dues', 'subscriptions'].includes(type)" v-model="filters.doctor_id" label="الطبيب" :items="doctors" item-title="name" item-value="id" clearable :loading="loadingFilters" />
       <v-autocomplete v-if="['sessions', 'collections', 'debts', 'subscriptions'].includes(type)" v-model="filters.patient_id" label="المريض" :items="patients" item-title="name" item-value="id" clearable :loading="loadingFilters" />
       <v-select v-if="['collections', 'debts'].includes(type)" v-model="filters.sponsor_id" label="الجهة الراعية" :items="sponsors" item-title="name" item-value="id" clearable :loading="loadingFilters" />
       <v-select v-if="type === 'sessions'" v-model="filters.status" label="حالة الجلسة" :items="sessionStatuses" clearable />
       <v-select v-if="type === 'collections'" v-model="filters.transaction_type" label="نوع المعاملة" :items="paymentTypes" clearable />
-      <v-select v-if="type === 'collections'" v-model="filters.method" label="طريقة الدفع" :items="paymentMethods" clearable />
+      <v-select v-if="type === 'expenses'" v-model="filters.transaction_type" label="نوع المصروف" :items="expenseTypes" clearable />
+      <v-select v-if="['collections', 'expenses'].includes(type)" v-model="filters.method" label="طريقة الدفع" :items="paymentMethods" clearable />
       <v-select v-if="type === 'debts'" v-model="filters.status" label="حالة الدين" :items="debtStatuses" clearable />
       <v-select v-if="type === 'debts'" v-model="filters.kind" label="نوع الدين" :items="debtKinds" clearable />
       <v-select v-if="type === 'subscriptions'" v-model="filters.status" label="الحالة" :items="subscriptionStatuses" clearable />
-      <v-checkbox v-if="type === 'subscriptions'" v-model="filters.near_end" label="قريبة من الانتهاء" :true-value="1" :false-value="null" hide-details />
+      <v-select v-if="type === 'expenses'" v-model="filters.status" label="الحالة" :items="expenseStatuses" clearable />
       <v-btn color="primary" prepend-icon="mdi-filter-outline" data-form-flow-filter-action @click="load">تطبيق الفلاتر</v-btn>
       <v-btn variant="text" @click="clearFilters">مسح</v-btn>
     </section>
@@ -57,7 +58,7 @@ import InlineError from '@/components/common/InlineError.vue'
 import MoneyText from '@/components/common/MoneyText.vue'
 import PageHeader from '@/components/common/PageHeader.vue'
 import ReportTable from '@/components/reports/ReportTable.vue'
-import { paymentMethods } from '@/constants/labels'
+import { expenseTypes, paymentMethods } from '@/constants/labels'
 import { formatReportDateTime, getReportDefinition, reportSummaryItems, reportTypes } from '@/constants/reports'
 import { useUiStore } from '@/stores/ui'
 
@@ -79,12 +80,12 @@ const filters = reactive({
   method: route.query.method || null,
   status: route.query.status || null,
   kind: route.query.kind || null,
-  near_end: route.query.near_end === '1' ? 1 : null,
 })
 const sessionStatuses = [{ title: 'مفتوحة', value: 'open' }, { title: 'مغلقة', value: 'closed' }, { title: 'ملغاة', value: 'cancelled' }]
-const subscriptionStatuses = [{ title: 'نشط', value: 'active' }, { title: 'مكتمل', value: 'completed' }, { title: 'موقوف', value: 'stopped' }, { title: 'ملغي', value: 'cancelled' }]
+const subscriptionStatuses = [{ title: 'نشط', value: 'active' }, { title: 'مكتمل', value: 'completed' }, { title: 'ملغي', value: 'cancelled' }]
 const debtStatuses = [{ title: 'مفتوح', value: 'open' }, { title: 'جزئي', value: 'partial' }, { title: 'مسدد', value: 'paid' }, { title: 'ملغى', value: 'void' }]
 const debtKinds = [{ title: 'جلسة', value: 'session' }, { title: 'اشتراك', value: 'subscription' }, { title: 'افتتاحي', value: 'opening' }]
+const expenseStatuses = [{ title: 'نشط', value: 'active' }, { title: 'ملغي', value: 'cancelled' }]
 const paymentTypes = [{ title: 'دفعة جلسة', value: 'session_payment' }, { title: 'دفعة اشتراك', value: 'subscription_payment' }, { title: 'شحن رصيد', value: 'wallet_topup' }, { title: 'تسديد دين', value: 'debt_payment' }, { title: 'استرجاع', value: 'refund' }]
 const generatedAt = computed(() => formatReportDateTime(report.value?.meta?.generated_at))
 const summaryItems = computed(() => reportSummaryItems(type.value, report.value?.totals))
@@ -98,7 +99,7 @@ async function loadFilters() {
   filterError.value = ''
   try {
     const [doctorOptions, patientResponse, sponsorOptions] = await Promise.all([
-      ['sessions', 'doctor-dues'].includes(type.value) ? getDoctorOptions() : [],
+      ['sessions', 'doctor-dues', 'subscriptions'].includes(type.value) ? getDoctorOptions() : [],
       ['sessions', 'collections', 'debts', 'subscriptions'].includes(type.value) ? listPatients({ per_page: 100 }) : { data: [] },
       ['collections', 'debts'].includes(type.value) ? getSponsorOptions() : [],
     ])
@@ -129,7 +130,7 @@ async function load() {
   }
 }
 function clearFilters() {
-  Object.assign(filters, { from: '', to: '', doctor_id: null, patient_id: null, sponsor_id: null, transaction_type: null, method: null, status: null, kind: null, near_end: null })
+  Object.assign(filters, { from: '', to: '', doctor_id: null, patient_id: null, sponsor_id: null, transaction_type: null, method: null, status: null, kind: null })
   load()
 }
 function reportParams() {

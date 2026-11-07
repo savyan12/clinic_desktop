@@ -1,6 +1,6 @@
 # Clinic Desktop Application
 
-This standalone repository contains the offline desktop edition of the physiotherapy clinic system. It keeps the Vue 3/Vuetify interface while Tauri starts a private local MySQL 8 server and an embedded loopback-only Rust API built with Axum and SQLx. The retained `backend/` directory is a migration reference and rollback source; it is not packaged or required at runtime.
+This standalone repository contains the offline desktop edition of the physiotherapy clinic system. It keeps the Vue 3/Vuetify interface while Tauri starts a private local MySQL 8 server and an embedded loopback-only Rust API built with Axum and SQLx. The retired Laravel source has been removed; PHP and Composer are not part of the project or its runtime.
 
 For customer prerequisites, installation, activation, backup/restore, and the release checklist, see [Customer Installation Guide](docs/CUSTOMER_INSTALLATION.md). For automated builds, version tags, runtime pins, and separate Windows 10/11 acceptance, see [GitHub Actions Windows Builds](docs/GITHUB_ACTIONS_WINDOWS_BUILD.md).
 

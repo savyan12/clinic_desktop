@@ -38,7 +38,6 @@ pub async fn index(
     _auth: AuthUser,
     Query(query): Query<PatientListQuery>,
 ) -> ApiResult<Json<Value>> {
-    expire_monthly(&state).await?;
     let page = pagination::PageQuery {
         page: query.page,
         per_page: query.per_page,
@@ -49,9 +48,9 @@ pub async fn index(
     let filter = "FROM patients p WHERE (? = '' OR p.name LIKE ? OR p.phone LIKE ?) \
         AND (? = '' \
           OR (? = 'active' AND EXISTS (SELECT 1 FROM subscriptions sub WHERE sub.patient_id = p.id AND sub.status = 'active' \
-             AND (sub.plan_type = 'legacy_package' OR (sub.plan_type = 'monthly' AND sub.start_date <= CURDATE() AND sub.end_date >= CURDATE())))) \
+             AND sub.sessions_used < sub.sessions_count)) \
           OR (? = 'none' AND NOT EXISTS (SELECT 1 FROM subscriptions sub WHERE sub.patient_id = p.id AND sub.status = 'active' \
-             AND (sub.plan_type = 'legacy_package' OR (sub.plan_type = 'monthly' AND sub.start_date <= CURDATE() AND sub.end_date >= CURDATE())))))";
+             AND sub.sessions_used < sub.sessions_count)))";
     let count_sql = format!("SELECT CAST(COUNT(*) AS UNSIGNED) {filter}");
     let select_sql = format!("SELECT p.* {filter} ORDER BY p.id DESC LIMIT ? OFFSET ?");
     let total = sqlx::query_scalar::<_, u64>(&count_sql)
@@ -128,7 +127,6 @@ pub async fn show(
     _auth: AuthUser,
     Path(id): Path<u64>,
 ) -> ApiResult<Json<Value>> {
-    expire_monthly(&state).await?;
     let patient = fetch(&state, id).await?;
     let mut value = summary(&state, &patient).await?;
 
@@ -381,12 +379,6 @@ async fn validate_sponsor(state: &AppState, sponsor_id: Option<u64>) -> ApiResul
                 .field("sponsor_id", "الجهة المحددة غير موجودة أو غير نشطة."));
         }
     }
-    Ok(())
-}
-
-async fn expire_monthly(state: &AppState) -> ApiResult<()> {
-    sqlx::query("UPDATE subscriptions SET status = 'completed', updated_at = NOW() WHERE plan_type = 'monthly' AND status = 'active' AND end_date < CURDATE()")
-        .execute(&state.pool).await?;
     Ok(())
 }
 

@@ -21,11 +21,14 @@ const MIGRATIONS: &[&str] = &[
     "2026_10_29_014636_create_audit_logs_table",
     "2026_10_29_014637_create_idempotency_keys_table",
     "2026_10_29_014638_create_settings_table",
-    "2026_10_30_120000_add_cancellation_fields_to_subscriptions_table",
-    "2026_11_01_173532_add_monthly_subscription_and_service_addon_fields",
+    "2026_11_01_173532_add_service_and_session_unit_fields",
     "2026_11_01_173533_add_session_addition_support",
     "2026_11_01_173534_make_patient_demographics_optional",
     "2026_11_01_173535_add_typography_settings",
+    "2026_11_06_115000_rebuild_subscriptions_fixed_session_model",
+    "2026_11_06_120000_create_payment_refund_allocations_table",
+    "2026_11_07_120000_create_administrative_expenses_table",
+    "2026_11_07_130000_add_administrative_expense_rental_dates",
 ];
 
 pub async fn reset(pool: &MySqlPool) -> Result<(), String> {
@@ -34,6 +37,8 @@ pub async fn reset(pool: &MySqlPool) -> Result<(), String> {
         .map_err(migration_error)?;
 
     for table in [
+        "administrative_expenses",
+        "payment_refund_allocations",
         "payment_allocations",
         "wallet_transactions",
         "payments",
@@ -129,6 +134,8 @@ pub async fn validate(pool: &MySqlPool) -> Result<(), String> {
         "payments",
         "debts",
         "payment_allocations",
+        "payment_refund_allocations",
+        "administrative_expenses",
         "doctor_payouts",
         "audit_logs",
         "idempotency_keys",
@@ -141,13 +148,19 @@ pub async fn validate(pool: &MySqlPool) -> Result<(), String> {
 
     for (table, column) in [
         ("services", "extra_unit_price"),
-        ("subscriptions", "plan_type"),
+        ("subscriptions", "name"),
+        ("subscriptions", "total_price"),
         ("subscriptions", "cancelled_at"),
         ("sessions", "commission_amount"),
         ("session_services", "session_addition_id"),
         ("payments", "session_addition_id"),
         ("debts", "session_addition_id"),
         ("wallet_transactions", "session_addition_id"),
+        ("administrative_expenses", "rent_period"),
+        ("administrative_expenses", "rent_month"),
+        ("administrative_expenses", "rent_start_date"),
+        ("administrative_expenses", "rent_end_date"),
+        ("administrative_expenses", "cancel_reason"),
         ("settings", "section_font_weight"),
     ] {
         if !column_exists(pool, table, column).await? {
@@ -197,11 +210,8 @@ async fn apply(pool: &MySqlPool, migration: &str) -> Result<(), String> {
             execute_all(pool, &[IDEMPOTENCY_KEYS]).await
         }
         "2026_10_29_014638_create_settings_table" => execute_all(pool, &[SETTINGS]).await,
-        "2026_10_30_120000_add_cancellation_fields_to_subscriptions_table" => {
-            add_subscription_cancellation(pool).await
-        }
-        "2026_11_01_173532_add_monthly_subscription_and_service_addon_fields" => {
-            add_monthly_and_service_units(pool).await
+        "2026_11_01_173532_add_service_and_session_unit_fields" => {
+            add_service_and_session_units(pool).await
         }
         "2026_11_01_173533_add_session_addition_support" => add_session_additions(pool).await,
         "2026_11_01_173534_make_patient_demographics_optional" => {
@@ -215,34 +225,37 @@ async fn apply(pool: &MySqlPool, migration: &str) -> Result<(), String> {
             .await
         }
         "2026_11_01_173535_add_typography_settings" => add_typography(pool).await,
+        "2026_11_06_115000_rebuild_subscriptions_fixed_session_model" => {
+            rebuild_subscriptions_fixed_session_model(pool).await
+        }
+        "2026_11_06_120000_create_payment_refund_allocations_table" => {
+            execute_all(pool, &[PAYMENT_REFUND_ALLOCATIONS]).await
+        }
+        "2026_11_07_120000_create_administrative_expenses_table" => {
+            execute_all(pool, &[ADMINISTRATIVE_EXPENSES]).await
+        }
+        "2026_11_07_130000_add_administrative_expense_rental_dates" => {
+            add_administrative_expense_rental_dates(pool).await
+        }
         _ => Err(format!("ترحيل قاعدة البيانات غير معروف: {migration}")),
     }
 }
 
-async fn add_subscription_cancellation(pool: &MySqlPool) -> Result<(), String> {
-    pool.execute(
-        "ALTER TABLE subscriptions MODIFY COLUMN status ENUM('active','completed','stopped','cancelled') NOT NULL DEFAULT 'active'",
-    )
-    .await
-    .map_err(migration_error)?;
-
-    if !column_exists(pool, "subscriptions", "cancelled_at").await? {
-        execute_all(
-            pool,
-            &[
-                "ALTER TABLE subscriptions ADD COLUMN cancelled_at TIMESTAMP NULL AFTER status",
-                "ALTER TABLE subscriptions ADD COLUMN cancelled_by BIGINT UNSIGNED NULL AFTER cancelled_at, ADD CONSTRAINT subscriptions_cancelled_by_foreign FOREIGN KEY (cancelled_by) REFERENCES users(id) ON DELETE RESTRICT",
-                "ALTER TABLE subscriptions ADD COLUMN cancel_reason TEXT NULL AFTER cancelled_by",
-                "ALTER TABLE subscriptions ADD COLUMN refund_amount DECIMAL(12,3) UNSIGNED NOT NULL DEFAULT 0 AFTER cancel_reason",
-            ],
-        )
-        .await?;
+async fn add_administrative_expense_rental_dates(pool: &MySqlPool) -> Result<(), String> {
+    if !column_exists(pool, "administrative_expenses", "rent_month").await? {
+        execute_all(pool, &["ALTER TABLE administrative_expenses ADD COLUMN rent_month CHAR(7) NULL AFTER rent_period"]).await?;
+    }
+    if !column_exists(pool, "administrative_expenses", "rent_start_date").await? {
+        execute_all(pool, &["ALTER TABLE administrative_expenses ADD COLUMN rent_start_date DATE NULL AFTER rent_month"]).await?;
+    }
+    if !column_exists(pool, "administrative_expenses", "rent_end_date").await? {
+        execute_all(pool, &["ALTER TABLE administrative_expenses ADD COLUMN rent_end_date DATE NULL AFTER rent_start_date"]).await?;
     }
 
     Ok(())
 }
 
-async fn add_monthly_and_service_units(pool: &MySqlPool) -> Result<(), String> {
+async fn add_service_and_session_units(pool: &MySqlPool) -> Result<(), String> {
     if !column_exists(pool, "services", "included_units").await? {
         execute_all(
             pool,
@@ -250,18 +263,6 @@ async fn add_monthly_and_service_units(pool: &MySqlPool) -> Result<(), String> {
                 "ALTER TABLE services ADD COLUMN included_units SMALLINT UNSIGNED NULL AFTER price",
                 "ALTER TABLE services ADD COLUMN unit_name VARCHAR(50) NULL AFTER included_units",
                 "ALTER TABLE services ADD COLUMN extra_unit_price DECIMAL(12,3) UNSIGNED NULL AFTER unit_name",
-            ],
-        )
-        .await?;
-    }
-
-    if !column_exists(pool, "subscriptions", "plan_type").await? {
-        execute_all(
-            pool,
-            &[
-                "ALTER TABLE subscriptions ADD COLUMN plan_type VARCHAR(32) NOT NULL DEFAULT 'legacy_package' AFTER sponsor_id",
-                "CREATE INDEX subscriptions_plan_type_index ON subscriptions(plan_type)",
-                "ALTER TABLE subscriptions ADD COLUMN end_date DATE NULL AFTER expected_end_date",
             ],
         )
         .await?;
@@ -384,6 +385,138 @@ async fn add_typography(pool: &MySqlPool) -> Result<(), String> {
     .await
 }
 
+async fn rebuild_subscriptions_fixed_session_model(pool: &MySqlPool) -> Result<(), String> {
+    if !column_exists(pool, "subscriptions", "name").await? {
+        pool.execute(
+            "ALTER TABLE subscriptions ADD COLUMN name VARCHAR(255) NULL AFTER patient_id",
+        )
+        .await
+        .map_err(migration_error)?;
+    }
+    pool.execute(
+        "UPDATE subscriptions SET name = CONCAT('اشتراك رقم ', id) \
+         WHERE name IS NULL OR TRIM(name) = ''",
+    )
+    .await
+    .map_err(migration_error)?;
+    pool.execute("ALTER TABLE subscriptions MODIFY COLUMN name VARCHAR(255) NOT NULL")
+        .await
+        .map_err(migration_error)?;
+
+    if !column_exists(pool, "subscriptions", "total_price").await? {
+        pool.execute(
+            "ALTER TABLE subscriptions ADD COLUMN total_price DECIMAL(12,3) UNSIGNED NULL AFTER sessions_used",
+        )
+        .await
+        .map_err(migration_error)?;
+        let legacy_price = if column_exists(pool, "subscriptions", "net_total").await? {
+            "net_total"
+        } else if column_exists(pool, "subscriptions", "base_total").await? {
+            "base_total"
+        } else {
+            "0"
+        };
+        pool.execute(
+            format!(
+                "UPDATE subscriptions SET total_price = COALESCE({legacy_price}, 0) WHERE total_price IS NULL"
+            )
+            .as_str(),
+        )
+        .await
+        .map_err(migration_error)?;
+    }
+    pool.execute(
+        "ALTER TABLE subscriptions MODIFY COLUMN total_price DECIMAL(12,3) UNSIGNED NOT NULL",
+    )
+    .await
+    .map_err(migration_error)?;
+
+    if !column_exists(pool, "subscriptions", "cancelled_at").await? {
+        pool.execute(
+            "ALTER TABLE subscriptions ADD COLUMN cancelled_at TIMESTAMP NULL AFTER status",
+        )
+        .await
+        .map_err(migration_error)?;
+    }
+    if !column_exists(pool, "subscriptions", "cancelled_by").await? {
+        pool.execute(
+            "ALTER TABLE subscriptions ADD COLUMN cancelled_by BIGINT UNSIGNED NULL AFTER cancelled_at",
+        )
+        .await
+        .map_err(migration_error)?;
+    }
+    if !column_exists(pool, "subscriptions", "cancel_reason").await? {
+        pool.execute(
+            "ALTER TABLE subscriptions ADD COLUMN cancel_reason TEXT NULL AFTER cancelled_by",
+        )
+        .await
+        .map_err(migration_error)?;
+    }
+    if !foreign_key_exists(pool, "subscriptions", "subscriptions_cancelled_by_foreign").await? {
+        pool.execute(
+            "ALTER TABLE subscriptions ADD CONSTRAINT subscriptions_cancelled_by_foreign \
+             FOREIGN KEY (cancelled_by) REFERENCES users(id) ON DELETE RESTRICT",
+        )
+        .await
+        .map_err(migration_error)?;
+    }
+
+    pool.execute(
+        "ALTER TABLE subscriptions MODIFY COLUMN status VARCHAR(32) NOT NULL DEFAULT 'active'",
+    )
+    .await
+    .map_err(migration_error)?;
+    pool.execute(
+        "UPDATE subscriptions SET status = CASE \
+            WHEN sessions_used >= sessions_count THEN 'completed' ELSE 'active' END \
+         WHERE status = 'stopped'",
+    )
+    .await
+    .map_err(migration_error)?;
+    pool.execute(
+        "ALTER TABLE subscriptions MODIFY COLUMN status \
+         ENUM('active','completed','cancelled') NOT NULL DEFAULT 'active'",
+    )
+    .await
+    .map_err(migration_error)?;
+
+    if foreign_key_exists(pool, "subscriptions", "subscriptions_sponsor_id_foreign").await? {
+        pool.execute("ALTER TABLE subscriptions DROP FOREIGN KEY subscriptions_sponsor_id_foreign")
+            .await
+            .map_err(migration_error)?;
+    }
+    if index_exists(pool, "subscriptions", "subscriptions_plan_type_index").await? {
+        pool.execute("ALTER TABLE subscriptions DROP INDEX subscriptions_plan_type_index")
+            .await
+            .map_err(migration_error)?;
+    }
+    for column in [
+        "sponsor_id",
+        "plan_type",
+        "base_total",
+        "discount",
+        "net_total",
+        "paid_amount",
+        "expected_end_date",
+        "end_date",
+        "scheduled_weekdays",
+        "refund_amount",
+    ] {
+        if column_exists(pool, "subscriptions", column).await? {
+            pool.execute(format!("ALTER TABLE subscriptions DROP COLUMN `{column}`").as_str())
+                .await
+                .map_err(migration_error)?;
+        }
+    }
+    if column_exists(pool, "subscription_services", "price").await? {
+        pool.execute("ALTER TABLE subscription_services DROP COLUMN price")
+            .await
+            .map_err(migration_error)?;
+    }
+
+    Ok(())
+}
+
 async fn execute_all(pool: &MySqlPool, statements: &[&str]) -> Result<(), String> {
     for statement in statements {
         pool.execute(*statement).await.map_err(migration_error)?;
@@ -420,6 +553,24 @@ async fn index_exists(pool: &MySqlPool, table: &str, index: &str) -> Result<bool
     )
     .bind(table)
     .bind(index)
+    .fetch_one(pool)
+    .await
+    .map(|count| count > 0)
+    .map_err(migration_error)
+}
+
+async fn foreign_key_exists(
+    pool: &MySqlPool,
+    table: &str,
+    constraint: &str,
+) -> Result<bool, String> {
+    sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM information_schema.table_constraints \
+         WHERE constraint_schema = DATABASE() AND table_name = ? \
+         AND constraint_name = ? AND constraint_type = 'FOREIGN KEY'",
+    )
+    .bind(table)
+    .bind(constraint)
     .fetch_one(pool)
     .await
     .map(|count| count > 0)
@@ -480,20 +631,20 @@ const PATIENTS: &str = "CREATE TABLE IF NOT EXISTS patients (\
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
 
 const SUBSCRIPTIONS: &str = "CREATE TABLE IF NOT EXISTS subscriptions (\
-    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY, patient_id BIGINT UNSIGNED NOT NULL, sponsor_id BIGINT UNSIGNED NULL, \
-    sessions_count INT UNSIGNED NOT NULL, sessions_used INT UNSIGNED NOT NULL DEFAULT 0, base_total DECIMAL(12,3) UNSIGNED NOT NULL, \
-    discount DECIMAL(12,3) UNSIGNED NOT NULL DEFAULT 0, net_total DECIMAL(12,3) UNSIGNED NOT NULL, paid_amount DECIMAL(12,3) UNSIGNED NOT NULL DEFAULT 0, \
-    start_date DATE NOT NULL, expected_end_date DATE NULL, status ENUM('active','completed','stopped') NOT NULL DEFAULT 'active', \
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY, patient_id BIGINT UNSIGNED NOT NULL, name VARCHAR(255) NOT NULL, \
+    sessions_count INT UNSIGNED NOT NULL, sessions_used INT UNSIGNED NOT NULL DEFAULT 0, total_price DECIMAL(12,3) UNSIGNED NOT NULL, \
+    start_date DATE NOT NULL, status ENUM('active','completed','cancelled') NOT NULL DEFAULT 'active', \
+    cancelled_at TIMESTAMP NULL, cancelled_by BIGINT UNSIGNED NULL, cancel_reason TEXT NULL, \
     created_by BIGINT UNSIGNED NOT NULL, created_at TIMESTAMP NULL, updated_at TIMESTAMP NULL, \
     INDEX subscriptions_patient_id_status_index(patient_id,status), INDEX subscriptions_status_start_date_index(status,start_date), \
     CONSTRAINT subscriptions_patient_id_foreign FOREIGN KEY(patient_id) REFERENCES patients(id) ON DELETE RESTRICT, \
-    CONSTRAINT subscriptions_sponsor_id_foreign FOREIGN KEY(sponsor_id) REFERENCES sponsors(id) ON DELETE RESTRICT, \
+    CONSTRAINT subscriptions_cancelled_by_foreign FOREIGN KEY(cancelled_by) REFERENCES users(id) ON DELETE RESTRICT, \
     CONSTRAINT subscriptions_created_by_foreign FOREIGN KEY(created_by) REFERENCES users(id) ON DELETE RESTRICT\
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
 
 const SUBSCRIPTION_SERVICES: &str = "CREATE TABLE IF NOT EXISTS subscription_services (\
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY, subscription_id BIGINT UNSIGNED NOT NULL, service_id BIGINT UNSIGNED NOT NULL, \
-    service_name VARCHAR(255) NOT NULL, price DECIMAL(12,3) UNSIGNED NOT NULL, created_by BIGINT UNSIGNED NOT NULL, \
+    service_name VARCHAR(255) NOT NULL, created_by BIGINT UNSIGNED NOT NULL, \
     created_at TIMESTAMP NULL, updated_at TIMESTAMP NULL, UNIQUE KEY subscription_services_subscription_id_service_id_unique(subscription_id,service_id), \
     CONSTRAINT subscription_services_subscription_id_foreign FOREIGN KEY(subscription_id) REFERENCES subscriptions(id) ON DELETE RESTRICT, \
     CONSTRAINT subscription_services_service_id_foreign FOREIGN KEY(service_id) REFERENCES services(id) ON DELETE RESTRICT, \
@@ -591,12 +742,38 @@ const PAYMENT_ALLOCATIONS: &str = "CREATE TABLE IF NOT EXISTS payment_allocation
     CONSTRAINT payment_allocations_created_by_foreign FOREIGN KEY(created_by) REFERENCES users(id) ON DELETE RESTRICT\
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
 
+const PAYMENT_REFUND_ALLOCATIONS: &str = "CREATE TABLE IF NOT EXISTS payment_refund_allocations (\
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY, refund_payment_id BIGINT UNSIGNED NOT NULL, original_payment_id BIGINT UNSIGNED NOT NULL, \
+    amount DECIMAL(12,3) UNSIGNED NOT NULL, created_by BIGINT UNSIGNED NOT NULL, created_at TIMESTAMP NULL, updated_at TIMESTAMP NULL, \
+    UNIQUE KEY payment_refund_allocations_refund_original_unique(refund_payment_id,original_payment_id), \
+    INDEX payment_refund_allocations_original_payment_id_index(original_payment_id), \
+    CONSTRAINT payment_refund_allocations_refund_payment_id_foreign FOREIGN KEY(refund_payment_id) REFERENCES payments(id) ON DELETE RESTRICT, \
+    CONSTRAINT payment_refund_allocations_original_payment_id_foreign FOREIGN KEY(original_payment_id) REFERENCES payments(id) ON DELETE RESTRICT, \
+    CONSTRAINT payment_refund_allocations_created_by_foreign FOREIGN KEY(created_by) REFERENCES users(id) ON DELETE RESTRICT\
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+
 const DOCTOR_PAYOUTS: &str = "CREATE TABLE IF NOT EXISTS doctor_payouts (\
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY, doctor_id BIGINT UNSIGNED NOT NULL, amount DECIMAL(12,3) UNSIGNED NOT NULL, \
     date DATE NOT NULL, method ENUM('cash','transfer') NOT NULL, note TEXT NULL, created_by BIGINT UNSIGNED NOT NULL, \
     created_at TIMESTAMP NULL, updated_at TIMESTAMP NULL, INDEX doctor_payouts_doctor_id_date_index(doctor_id,date), \
     CONSTRAINT doctor_payouts_doctor_id_foreign FOREIGN KEY(doctor_id) REFERENCES doctors(id) ON DELETE RESTRICT, \
     CONSTRAINT doctor_payouts_created_by_foreign FOREIGN KEY(created_by) REFERENCES users(id) ON DELETE RESTRICT\
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+
+const ADMINISTRATIVE_EXPENSES: &str = "CREATE TABLE IF NOT EXISTS administrative_expenses (\
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY, \
+    type ENUM('purchase','rent') NOT NULL, description VARCHAR(255) NOT NULL, recipient VARCHAR(255) NOT NULL, \
+    payment_date DATE NOT NULL, amount DECIMAL(12,3) UNSIGNED NOT NULL, payment_method ENUM('cash','transfer') NOT NULL, \
+    reference_number VARCHAR(100) NULL, rent_period VARCHAR(100) NULL, rent_month CHAR(7) NULL, \
+    rent_start_date DATE NULL, rent_end_date DATE NULL, notes TEXT NULL, \
+    status ENUM('active','cancelled') NOT NULL DEFAULT 'active', cancelled_at TIMESTAMP NULL, \
+    cancelled_by BIGINT UNSIGNED NULL, cancel_reason TEXT NULL, created_by BIGINT UNSIGNED NOT NULL, \
+    created_at TIMESTAMP NULL, updated_at TIMESTAMP NULL, \
+    INDEX administrative_expenses_status_payment_date_index(status,payment_date), \
+    INDEX administrative_expenses_type_payment_date_index(type,payment_date), \
+    INDEX administrative_expenses_payment_method_payment_date_index(payment_method,payment_date), \
+    CONSTRAINT administrative_expenses_cancelled_by_foreign FOREIGN KEY(cancelled_by) REFERENCES users(id) ON DELETE RESTRICT, \
+    CONSTRAINT administrative_expenses_created_by_foreign FOREIGN KEY(created_by) REFERENCES users(id) ON DELETE RESTRICT\
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
 
 const AUDIT_LOGS: &str = "CREATE TABLE IF NOT EXISTS audit_logs (\
@@ -637,6 +814,7 @@ const SESSION_ADDITIONS: &str = "CREATE TABLE IF NOT EXISTS session_additions (\
 mod tests {
     use super::*;
     use crate::api::db;
+    use rust_decimal::Decimal;
 
     async fn test_pool(variable: &str) -> MySqlPool {
         let database = std::env::var(variable)
@@ -665,6 +843,17 @@ mod tests {
         reset(&pool).await.expect("create fresh Rust schema");
         validate(&pool).await.expect("validate fresh Rust schema");
 
+        let (nullable, column_type) = sqlx::query_as::<_, (String, String)>(
+            "SELECT CAST(is_nullable AS CHAR), CAST(column_type AS CHAR) \
+             FROM information_schema.columns \
+             WHERE table_schema = DATABASE() AND table_name = 'subscriptions' AND column_name = 'name'",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("read subscriptions.name definition");
+        assert_eq!(nullable, "NO");
+        assert_eq!(column_type, "varchar(255)");
+
         let migration_count =
             sqlx::query_scalar::<_, u64>("SELECT CAST(COUNT(*) AS UNSIGNED) FROM migrations")
                 .fetch_one(&pool)
@@ -674,83 +863,120 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires a Laravel-migrated isolated MySQL 8 database"]
-    async fn accepts_existing_laravel_schema_without_changing_rows() {
-        let pool = test_pool("RUST_MYSQL_EXISTING_DATABASE").await;
-        let before = table_counts(&pool).await;
-        migrate(&pool)
-            .await
-            .expect("accept existing Laravel schema");
-        let after = table_counts(&pool).await;
-        assert_eq!(after, before);
+    #[ignore = "requires an isolated MySQL 8 database"]
+    async fn upgrades_legacy_expense_schema_with_structured_rental_dates() {
+        let pool = test_pool("RUST_MYSQL_DATABASE").await;
+        reset(&pool).await.expect("create baseline schema");
+
+        execute_all(
+            &pool,
+            &[
+                "ALTER TABLE administrative_expenses DROP COLUMN rent_end_date",
+                "ALTER TABLE administrative_expenses DROP COLUMN rent_start_date",
+                "ALTER TABLE administrative_expenses DROP COLUMN rent_month",
+                "DELETE FROM migrations WHERE migration = '2026_11_07_130000_add_administrative_expense_rental_dates'",
+            ],
+        )
+        .await
+        .expect("simulate legacy expense schema");
+
+        migrate(&pool).await.expect("upgrade legacy expense schema");
+        for column in ["rent_month", "rent_start_date", "rent_end_date"] {
+            assert!(
+                column_exists(&pool, "administrative_expenses", column)
+                    .await
+                    .expect("inspect upgraded expense schema"),
+                "missing upgraded expense column: {column}"
+            );
+        }
     }
 
     #[tokio::test]
-    #[ignore = "requires isolated Rust-fresh and Laravel-migrated MySQL 8 databases"]
-    async fn fresh_schema_matches_laravel_schema_definition() {
-        let rust_pool = test_pool("RUST_MYSQL_DATABASE").await;
-        let laravel_pool = test_pool("RUST_MYSQL_EXISTING_DATABASE").await;
-        reset(&rust_pool).await.expect("create fresh Rust schema");
+    #[ignore = "requires an isolated MySQL 8 database"]
+    async fn upgrades_recorded_legacy_subscription_schema_to_fixed_session_model() {
+        let pool = test_pool("RUST_MYSQL_DATABASE").await;
+        reset(&pool).await.expect("create baseline schema");
 
-        assert_eq!(
-            schema_signature(&rust_pool).await,
-            schema_signature(&laravel_pool).await,
-        );
-    }
-
-    async fn table_counts(pool: &MySqlPool) -> Vec<(String, u64)> {
-        let tables = sqlx::query_scalar::<_, String>(
-            "SELECT CAST(table_name AS CHAR) FROM information_schema.tables \
-             WHERE table_schema = DATABASE() AND table_name != 'migrations' ORDER BY table_name",
+        execute_all(
+            &pool,
+            &[
+                "ALTER TABLE subscriptions MODIFY COLUMN status ENUM('active','completed','stopped','cancelled') NOT NULL DEFAULT 'active'",
+                "ALTER TABLE subscriptions ADD COLUMN sponsor_id BIGINT UNSIGNED NULL AFTER patient_id, ADD CONSTRAINT subscriptions_sponsor_id_foreign FOREIGN KEY (sponsor_id) REFERENCES sponsors(id) ON DELETE RESTRICT",
+                "ALTER TABLE subscriptions ADD COLUMN plan_type VARCHAR(32) NOT NULL DEFAULT 'legacy_package' AFTER sponsor_id",
+                "CREATE INDEX subscriptions_plan_type_index ON subscriptions(plan_type)",
+                "ALTER TABLE subscriptions ADD COLUMN base_total DECIMAL(12,3) UNSIGNED NOT NULL AFTER total_price",
+                "ALTER TABLE subscriptions ADD COLUMN discount DECIMAL(12,3) UNSIGNED NOT NULL DEFAULT 0 AFTER base_total",
+                "ALTER TABLE subscriptions ADD COLUMN net_total DECIMAL(12,3) UNSIGNED NOT NULL AFTER discount",
+                "ALTER TABLE subscriptions ADD COLUMN paid_amount DECIMAL(12,3) UNSIGNED NOT NULL DEFAULT 0 AFTER net_total",
+                "ALTER TABLE subscriptions ADD COLUMN expected_end_date DATE NULL AFTER start_date",
+                "ALTER TABLE subscriptions ADD COLUMN end_date DATE NULL AFTER expected_end_date",
+                "ALTER TABLE subscriptions ADD COLUMN refund_amount DECIMAL(12,3) UNSIGNED NOT NULL DEFAULT 0 AFTER cancel_reason",
+                "ALTER TABLE subscription_services ADD COLUMN price DECIMAL(12,3) UNSIGNED NOT NULL AFTER service_name",
+                "INSERT INTO users (name, username, password, role, is_active, created_at, updated_at) VALUES ('مدير قديم', 'legacy-admin', 'test', 'admin', 1, NOW(), NOW())",
+                "INSERT INTO patients (name, phone, age, gender, is_active, created_by, created_at, updated_at) VALUES ('مريض قديم', '0910000000', 30, 'male', 1, 1, NOW(), NOW())",
+                "INSERT INTO services (name, price, is_active, created_by, created_at, updated_at) VALUES ('خدمة قديمة', 50, 1, 1, NOW(), NOW())",
+                "INSERT INTO subscriptions (patient_id, name, plan_type, sessions_count, sessions_used, total_price, base_total, discount, net_total, paid_amount, start_date, status, created_by, created_at, updated_at) VALUES (1, 'اسم مؤقت', 'legacy_package', 5, 1, 250, 300, 50, 250, 100, CURDATE(), 'stopped', 1, NOW(), NOW())",
+                "INSERT INTO subscription_services (subscription_id, service_id, service_name, price, created_by, created_at, updated_at) VALUES (1, 1, 'خدمة قديمة', 50, 1, NOW(), NOW())",
+                "ALTER TABLE subscriptions DROP COLUMN name",
+                "ALTER TABLE subscriptions DROP COLUMN total_price",
+                "DELETE FROM migrations WHERE migration = '2026_11_06_115000_rebuild_subscriptions_fixed_session_model'",
+            ],
         )
-        .fetch_all(pool)
         .await
-        .expect("list test tables");
-        let mut counts = Vec::with_capacity(tables.len());
-        for table in tables {
-            let query = format!("SELECT CAST(COUNT(*) AS UNSIGNED) FROM `{table}`");
-            let count = sqlx::query_scalar::<_, u64>(&query)
-                .fetch_one(pool)
-                .await
-                .expect("count test table rows");
-            counts.push((table, count));
+        .expect("simulate recorded legacy subscription schema");
+
+        migrate(&pool)
+            .await
+            .expect("upgrade recorded legacy subscription schema");
+        validate(&pool).await.expect("validate upgraded schema");
+
+        let upgraded = sqlx::query_as::<_, (String, Decimal, String)>(
+            "SELECT name, total_price, status FROM subscriptions WHERE id = 1",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("read upgraded subscription");
+        assert_eq!(upgraded.0, "اشتراك رقم 1");
+        assert_eq!(upgraded.1, Decimal::from(250));
+        assert_eq!(upgraded.2, "active");
+
+        for column in [
+            "sponsor_id",
+            "plan_type",
+            "base_total",
+            "discount",
+            "net_total",
+            "paid_amount",
+            "expected_end_date",
+            "end_date",
+            "refund_amount",
+        ] {
+            assert!(
+                !column_exists(&pool, "subscriptions", column)
+                    .await
+                    .expect("check removed legacy column"),
+                "legacy subscriptions.{column} should be removed"
+            );
         }
-        counts
-    }
+        assert!(!column_exists(&pool, "subscription_services", "price")
+            .await
+            .expect("check removed service price"));
 
-    async fn schema_signature(pool: &MySqlPool) -> Vec<String> {
-        let mut signature = sqlx::query_scalar::<_, String>(
-            "SELECT CAST(CONCAT_WS('|', 'column', table_name, column_name, ordinal_position, \
-                    column_type, is_nullable, COALESCE(CAST(column_default AS CHAR), '<NULL>'), extra) AS CHAR) \
-             FROM information_schema.columns WHERE table_schema = DATABASE()",
+        sqlx::query(
+            "INSERT INTO subscriptions \
+             (patient_id, name, sessions_count, sessions_used, total_price, start_date, status, created_by, created_at, updated_at) \
+             VALUES (1, 'اشتراك جديد', 8, 0, 400, CURDATE(), 'active', 1, NOW(), NOW())",
         )
-        .fetch_all(pool)
+        .execute(&pool)
         .await
-        .expect("read schema columns");
-        signature.extend(
-            sqlx::query_scalar::<_, String>(
-                "SELECT CAST(CONCAT_WS('|', 'index', table_name, index_name, non_unique, \
-                        seq_in_index, column_name) AS CHAR) \
-                 FROM information_schema.statistics WHERE table_schema = DATABASE()",
-            )
-            .fetch_all(pool)
-            .await
-            .expect("read schema indexes"),
-        );
-        signature.extend(
-            sqlx::query_scalar::<_, String>(
-                "SELECT CAST(CONCAT_WS('|', 'foreign', k.table_name, k.constraint_name, \
-                        k.column_name, k.referenced_table_name, k.referenced_column_name, r.delete_rule) AS CHAR) \
-                 FROM information_schema.key_column_usage k \
-                 INNER JOIN information_schema.referential_constraints r \
-                   ON r.constraint_schema = k.constraint_schema AND r.constraint_name = k.constraint_name \
-                 WHERE k.table_schema = DATABASE() AND k.referenced_table_name IS NOT NULL",
-            )
-            .fetch_all(pool)
-            .await
-            .expect("read schema foreign keys"),
-        );
-        signature.sort();
-        signature
+        .expect("insert subscription using fixed-session columns only");
+        sqlx::query(
+            "INSERT INTO subscription_services \
+             (subscription_id, service_id, service_name, created_by, created_at, updated_at) \
+             VALUES (2, 1, 'خدمة قديمة', 1, NOW(), NOW())",
+        )
+        .execute(&pool)
+        .await
+        .expect("insert covered service without legacy price column");
     }
 }

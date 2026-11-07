@@ -3,7 +3,7 @@ export const permissions = {
     'sessions.create', 'sessions.editOpen', 'sessions.close', 'sessions.cancelOpen',
     'sessions.editClosed', 'sessions.cancelClosed', 'patients.create', 'subscriptions.create',
     'subscriptions.manage', 'wallet.topup', 'debts.settle', 'refunds.create',
-    'masters.manage', 'users.manage', 'payouts.create', 'reports.view', 'audit.view',
+    'masters.manage', 'users.manage', 'payouts.create', 'expenses.manage', 'reports.view', 'audit.view',
     'settings.manage',
   ],
   receptionist: [
@@ -11,4 +11,3 @@ export const permissions = {
     'patients.create', 'subscriptions.create', 'wallet.topup', 'debts.settle',
   ],
 }
-

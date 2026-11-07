@@ -5,12 +5,12 @@ use crate::api::{
     money, resources,
     rows::{
         DebtRow, DoctorRow, PatientRow, PaymentRow, ServiceRow, SessionAdditionRow, SessionRow,
-        SessionServiceRow, SubscriptionRow, SubscriptionServiceRow, SubscriptionUsageRow,
-        WalletTransactionRow,
+        SessionServiceRow, SubscriptionRow, SubscriptionUsageRow, WalletTransactionRow,
     },
     services::ledger,
     time,
 };
+use chrono::NaiveDate;
 use rust_decimal::Decimal;
 use serde_json::{json, Map, Value};
 use sqlx::{MySql, Row, Transaction};
@@ -136,6 +136,34 @@ struct PreparedSession {
     services: Vec<ResolvedService>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct CommissionSnapshot {
+    rate: Decimal,
+    base_amount: Decimal,
+    amount: Decimal,
+}
+
+fn session_commission(
+    is_subscription_session: bool,
+    commission_base: CommissionBase,
+    services_total: Decimal,
+    net_total: Decimal,
+    rate: Decimal,
+) -> Option<CommissionSnapshot> {
+    if is_subscription_session {
+        return None;
+    }
+    let base_amount = match commission_base {
+        CommissionBase::Gross => services_total,
+        CommissionBase::Net => net_total,
+    };
+    Some(CommissionSnapshot {
+        rate,
+        base_amount,
+        amount: money::percentage(base_amount, rate),
+    })
+}
+
 pub async fn create_and_close(
     transaction: &mut Transaction<'_, MySql>,
     payload: &Value,
@@ -155,6 +183,7 @@ pub async fn update(
 ) -> ApiResult<Value> {
     let data = object(payload)?;
     let current = fetch_locked_session(transaction, session_id).await?;
+    let is_subscription_session = validate_session_relationship(&current)?;
     if current.status != "open" {
         let role = user_role(transaction, actor_id).await?;
         if role == "receptionist" && current.status == "closed" {
@@ -163,6 +192,9 @@ pub async fn update(
             ));
         }
         return Err(ApiError::conflict("يمكن تعديل الجلسة المفتوحة فقط."));
+    }
+    if is_subscription_session {
+        validate_subscription_session_update_input(data)?;
     }
 
     let old = session_snapshot(transaction, &current).await?;
@@ -192,6 +224,7 @@ pub async fn close(
     config: &ApiConfig,
 ) -> ApiResult<SessionOperationResult> {
     let current = fetch_locked_session(transaction, session_id).await?;
+    let is_subscription_session = validate_session_relationship(&current)?;
     if current.status == "closed" {
         return Ok(SessionOperationResult {
             session: session_value(transaction, &current, false).await?,
@@ -204,7 +237,7 @@ pub async fn close(
     }
 
     lock_patient(transaction, current.patient_id, false).await?;
-    let effects = if current.r#type == "subscription" {
+    let effects = if is_subscription_session {
         Effects {
             subscription_usage: consume_subscription(transaction, &current, actor_id).await?,
             ..Effects::default()
@@ -227,24 +260,30 @@ pub async fn close(
         .await?
     };
 
-    let doctor = sqlx::query_as::<_, DoctorRow>("SELECT * FROM doctors WHERE id = ?")
-        .bind(current.doctor_id)
-        .fetch_optional(&mut **transaction)
-        .await?
-        .ok_or_else(ApiError::not_found)?;
-    let commission_base = match config.commission_base {
-        CommissionBase::Gross => current.services_total,
-        CommissionBase::Net => current.net_total,
+    let commission = if is_subscription_session {
+        None
+    } else {
+        let doctor = sqlx::query_as::<_, DoctorRow>("SELECT * FROM doctors WHERE id = ?")
+            .bind(current.doctor_id)
+            .fetch_optional(&mut **transaction)
+            .await?
+            .ok_or_else(ApiError::not_found)?;
+        session_commission(
+            false,
+            config.commission_base,
+            current.services_total,
+            current.net_total,
+            doctor.commission_rate,
+        )
     };
-    let commission_amount = money::percentage(commission_base, doctor.commission_rate);
     sqlx::query(
         "UPDATE sessions SET status = 'closed', closed_at = NOW(), closed_by = ?, \
          commission_rate = ?, commission_base_amount = ?, commission_amount = ?, updated_at = NOW() WHERE id = ?",
     )
     .bind(actor_id)
-    .bind(doctor.commission_rate)
-    .bind(commission_base)
-    .bind(commission_amount)
+    .bind(commission.map(|snapshot| snapshot.rate))
+    .bind(commission.map(|snapshot| snapshot.base_amount))
+    .bind(commission.map(|snapshot| snapshot.amount))
     .bind(session_id)
     .execute(&mut **transaction)
     .await?;
@@ -279,6 +318,15 @@ pub async fn add_services(
 ) -> ApiResult<AdditionResult> {
     let data = object(payload)?;
     let current = fetch_locked_session(transaction, session_id).await?;
+    let is_subscription_session = validate_session_relationship(&current)?;
+    if is_subscription_session {
+        return Err(
+            ApiError::validation("لا يمكن إضافة خدمات إلى جلسة اشتراك.").field(
+                "services",
+                "خدمات جلسة الاشتراك ثابتة ولا تقبل إضافات بعد تسجيل الجلسة.",
+            ),
+        );
+    }
     if current.status != "closed" {
         return Err(ApiError::conflict("يمكن إضافة خدمات إلى جلسة مغلقة فقط."));
     }
@@ -288,43 +336,21 @@ pub async fn add_services(
     let addition_total = money::sum(services.iter().map(|service| service.price));
     lock_patient(transaction, current.patient_id, false).await?;
 
-    let settlement = if current.r#type == "subscription" {
-        let subscription_id = current.subscription_id.ok_or_else(|| {
-            ApiError::internal("Subscription session is missing subscription_id.")
-        })?;
-        let subscription = fetch_locked_subscription(transaction, subscription_id).await?;
-        if subscription.plan_type != "monthly" {
-            return Err(
-                ApiError::validation("إضافة خدمات بعد الإغلاق متاحة للاشتراكات الشهرية فقط.").field(
-                    "services",
-                    "استخدم تصحيح المدير للاشتراكات القديمة المعتمدة على عدد الجلسات.",
-                ),
-            );
-        }
-        validate_monthly_subscription(&subscription)?;
-        Settlement::default()
-    } else {
-        let settlement = parse_settlement(data, None, true)?;
-        if money::sum([
-            settlement.wallet_amount,
-            settlement.paid_amount,
-            settlement.debt_amount,
-        ]) != addition_total
-        {
-            return Err(
-                ApiError::validation("مجموع تسوية الخدمات الإضافية يجب أن يساوي قيمتها.")
-                    .field("settlement", "راجع مبالغ الرصيد والمدفوع والدين."),
-            );
-        }
-        validate_paid_method(&settlement)?;
-        validate_sponsor_if_present(transaction, data, &settlement, true).await?;
-        settlement
-    };
-    let addition_coverage = if current.r#type == "subscription" {
-        "subscription".to_string()
-    } else {
-        coverage(&settlement)
-    };
+    let settlement = parse_settlement(data, None, true)?;
+    if money::sum([
+        settlement.wallet_amount,
+        settlement.paid_amount,
+        settlement.debt_amount,
+    ]) != addition_total
+    {
+        return Err(
+            ApiError::validation("مجموع تسوية الخدمات الإضافية يجب أن يساوي قيمتها.")
+                .field("settlement", "راجع مبالغ الرصيد والمدفوع والدين."),
+        );
+    }
+    validate_paid_method(&settlement)?;
+    validate_sponsor_if_present(transaction, data, &settlement, true).await?;
+    let addition_coverage = coverage(&settlement);
     let result = sqlx::query(
         "INSERT INTO session_additions \
          (session_id, services_total, net_total, coverage, wallet_amount, paid_amount, debt_amount, payment_method, sponsor_id, created_by, created_at, updated_at) \
@@ -353,19 +379,15 @@ pub async fn add_services(
     )
     .await?;
 
-    let effects = if current.r#type == "subscription" {
-        Effects::default()
-    } else {
-        apply_settlement(
-            transaction,
-            &current,
-            Some(addition_id),
-            &settlement,
-            "adjustment",
-            actor_id,
-        )
-        .await?
-    };
+    let effects = apply_settlement(
+        transaction,
+        &current,
+        Some(addition_id),
+        &settlement,
+        "adjustment",
+        actor_id,
+    )
+    .await?;
 
     let wallet_amount = money::round(current.wallet_amount + settlement.wallet_amount);
     let paid_amount = money::round(current.paid_amount + settlement.paid_amount);
@@ -386,13 +408,15 @@ pub async fn add_services(
         method: payment_method.clone(),
         sponsor_id: current.sponsor_id,
     };
-    let final_coverage = if current.r#type == "subscription" {
-        "subscription".to_string()
-    } else {
-        coverage(&total_settlement)
-    };
+    let final_coverage = coverage(&total_settlement);
     let commission_rate = current.commission_rate.unwrap_or(Decimal::ZERO);
     let commission_delta = money::percentage(addition_total, commission_rate);
+    let commission_base_amount = Some(money::round(
+        current.commission_base_amount.unwrap_or(Decimal::ZERO) + addition_total,
+    ));
+    let commission_amount = Some(money::round(
+        current.commission_amount.unwrap_or(Decimal::ZERO) + commission_delta,
+    ));
     sqlx::query(
         "UPDATE sessions SET services_total = ?, net_total = ?, wallet_amount = ?, paid_amount = ?, debt_amount = ?, \
          coverage = ?, payment_method = ?, commission_base_amount = ?, commission_amount = ?, updated_at = NOW() WHERE id = ?",
@@ -404,12 +428,8 @@ pub async fn add_services(
     .bind(debt_amount)
     .bind(final_coverage)
     .bind(payment_method)
-    .bind(money::round(
-        current.commission_base_amount.unwrap_or(Decimal::ZERO) + addition_total,
-    ))
-    .bind(money::round(
-        current.commission_amount.unwrap_or(Decimal::ZERO) + commission_delta,
-    ))
+    .bind(commission_base_amount)
+    .bind(commission_amount)
     .bind(session_id)
     .execute(&mut **transaction)
     .await?;
@@ -450,6 +470,7 @@ pub async fn cancel(
     actor_id: u64,
 ) -> ApiResult<CancellationResult> {
     let current = fetch_locked_session(transaction, session_id).await?;
+    let is_subscription_session = validate_session_relationship(&current)?;
     if current.status == "cancelled" {
         return Err(ApiError::conflict("تم إلغاء الجلسة بالفعل."));
     }
@@ -467,7 +488,8 @@ pub async fn cancel(
     } else {
         Value::Array(Vec::new())
     };
-    if was_closed {
+    let remove_commission = was_closed && !is_subscription_session;
+    if remove_commission {
         reversals
             .as_object_mut()
             .expect("closed-session reversals are an object")
@@ -487,13 +509,17 @@ pub async fn cancel(
     )
     .bind(actor_id)
     .bind(reason)
-    .bind(if was_closed { None } else { current.commission_rate })
-    .bind(if was_closed {
+    .bind(if remove_commission {
+        None
+    } else {
+        current.commission_rate
+    })
+    .bind(if remove_commission {
         None
     } else {
         current.commission_base_amount
     })
-    .bind(if was_closed {
+    .bind(if remove_commission {
         None
     } else {
         current.commission_amount
@@ -530,6 +556,7 @@ pub async fn correct(
     config: &ApiConfig,
 ) -> ApiResult<CorrectionResult> {
     let current = fetch_locked_session(transaction, session_id).await?;
+    let is_subscription_session = validate_session_relationship(&current)?;
     if current.status != "closed" {
         return Err(ApiError::conflict("يمكن تصحيح الجلسات المغلقة فقط."));
     }
@@ -539,7 +566,7 @@ pub async fn correct(
     let old_commission_rate = current.commission_rate.unwrap_or(Decimal::ZERO);
     let old_doctor_id = current.doctor_id;
 
-    let mut impact = if current.r#type == "subscription" {
+    let mut impact = if is_subscription_session {
         if changes.keys().any(|key| key != "doctor_id") {
             return Err(ApiError::validation(
                 "تصحيح جلسة الاشتراك يقتصر على الطبيب دون تغيير الاستهلاك أو القيمة.",
@@ -555,22 +582,13 @@ pub async fn correct(
                     .field("doctor_id", "معرف الطبيب غير صحيح.")
             })?;
             let doctor = active_doctor(transaction, doctor_id).await?;
-            let commission_base = match config.commission_base {
-                CommissionBase::Gross => current.services_total,
-                CommissionBase::Net => current.net_total,
-            };
-            sqlx::query(
-                "UPDATE sessions SET doctor_id = ?, commission_rate = ?, commission_base_amount = ?, commission_amount = ?, updated_at = NOW() WHERE id = ?",
-            )
-            .bind(doctor.id)
-            .bind(doctor.commission_rate)
-            .bind(commission_base)
-            .bind(money::percentage(commission_base, doctor.commission_rate))
-            .bind(session_id)
-            .execute(&mut **transaction)
-            .await?;
+            sqlx::query("UPDATE sessions SET doctor_id = ?, updated_at = NOW() WHERE id = ?")
+                .bind(doctor.id)
+                .bind(session_id)
+                .execute(&mut **transaction)
+                .await?;
         }
-        json!({ "commission_adjusted": true })
+        json!({ "supervising_doctor_updated": changes.contains_key("doctor_id") })
     } else {
         let additions = sqlx::query_scalar::<_, u64>(
             "SELECT CAST(COUNT(*) AS UNSIGNED) FROM session_additions WHERE session_id = ?",
@@ -763,17 +781,31 @@ async fn create_open(
     actor_id: u64,
 ) -> ApiResult<u64> {
     let prepared = prepare_open_session(transaction, data, None).await?;
+    let session_date = match data.get("session_date") {
+        Some(Value::String(value)) => {
+            NaiveDate::parse_from_str(value, "%Y-%m-%d").map_err(|_| {
+                ApiError::validation("تاريخ الجلسة غير صالح.")
+                    .field("session_date", "أدخل تاريخ جلسة صحيحًا.")
+            })?
+        }
+        Some(Value::Null) | None => time::today(),
+        _ => {
+            return Err(ApiError::validation("تاريخ الجلسة غير صالح.")
+                .field("session_date", "أدخل تاريخ جلسة صحيحًا."));
+        }
+    };
     let pending_code = format!("pending-{}", Uuid::new_v4());
     let result = sqlx::query(
         "INSERT INTO sessions \
          (code, patient_id, doctor_id, subscription_id, type, status, opened_at, created_by, services_total, discount, net_total, coverage, wallet_amount, paid_amount, debt_amount, payment_method, sponsor_id, created_at, updated_at) \
-         VALUES (?, ?, ?, ?, ?, 'open', NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())",
+         VALUES (?, ?, ?, ?, ?, 'open', TIMESTAMP(?, CURTIME()), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())",
     )
     .bind(pending_code)
     .bind(prepared.patient_id)
     .bind(prepared.doctor_id)
     .bind(prepared.subscription_id)
     .bind(&prepared.session_type)
+    .bind(session_date)
     .bind(actor_id)
     .bind(prepared.services_total)
     .bind(prepared.discount)
@@ -852,8 +884,14 @@ async fn prepare_open_session(
         return Err(ApiError::validation("البيانات المرسلة غير صحيحة.")
             .field("type", "نوع الجلسة غير صحيح."));
     }
+    if current.is_some_and(|row| row.r#type != session_type) {
+        return Err(ApiError::conflict(
+            "لا يمكن تحويل الجلسة بين النوع الفردي ونوع الاشتراك.",
+        ));
+    }
 
     if session_type == "subscription" {
+        validate_subscription_session_financial_input(data)?;
         let subscription_id = field_optional_u64(
             data,
             "subscription_id",
@@ -868,62 +906,44 @@ async fn prepare_open_session(
             return Err(ApiError::validation("الاشتراك المحدد غير صالح لهذا المريض.")
                 .field("subscription_id", "اختر اشتراكًا نشطًا يخص المريض."));
         }
-        if subscription.plan_type == "monthly" {
-            validate_monthly_subscription(&subscription)?;
-            let services = resolve_requested_services(transaction, data, current, false).await?;
-            let services_total = money::sum(services.iter().map(|service| service.price));
-            return Ok(PreparedSession {
-                patient_id: patient.id,
-                doctor_id,
-                subscription_id: Some(subscription.id),
-                session_type,
-                services_total,
-                discount: Decimal::ZERO,
-                net_total: services_total,
-                coverage: "subscription".into(),
-                settlement: Settlement::default(),
-                services,
-            });
-        }
         if subscription.sessions_used >= subscription.sessions_count {
             return Err(ApiError::validation("لا توجد جلسات متبقية في الاشتراك.")
                 .field("subscription_id", "الاشتراك مكتمل."));
         }
-        let snapshots = sqlx::query_as::<_, SubscriptionServiceRow>(
-            "SELECT * FROM subscription_services WHERE subscription_id = ? ORDER BY id",
+        let mut services = resolve_requested_services(transaction, data, current, false).await?;
+        validate_subscription_service_coverage(
+            transaction,
+            subscription.id,
+            services.iter().map(|service| service.service_id).collect(),
         )
-        .bind(subscription.id)
-        .fetch_all(&mut **transaction)
         .await?;
-        let services = snapshots
-            .iter()
-            .map(|service| ResolvedService {
-                service_id: service.service_id,
-                service_name: service.service_name.clone(),
-                price: service.price,
-                base_price: service.price,
-                included_units: 0,
-                extra_units: 0,
-                unit_name: None,
-                extra_unit_price: None,
-                item_type: "service".into(),
-            })
-            .collect::<Vec<_>>();
-        let services_total = money::sum(services.iter().map(|service| service.price));
-        let net_total = money::divide(subscription.net_total, subscription.sessions_count)
-            .map_err(ApiError::internal)?;
+        for service in &mut services {
+            service.price = Decimal::ZERO;
+            service.base_price = Decimal::ZERO;
+            service.included_units = 0;
+            service.extra_units = 0;
+            service.extra_unit_price = None;
+        }
         return Ok(PreparedSession {
             patient_id: patient.id,
             doctor_id,
             subscription_id: Some(subscription.id),
             session_type,
-            services_total,
-            discount: money::round(services_total - net_total),
-            net_total,
+            services_total: Decimal::ZERO,
+            discount: Decimal::ZERO,
+            net_total: Decimal::ZERO,
             coverage: "subscription".into(),
             settlement: Settlement::default(),
             services,
         });
+    }
+
+    if data
+        .get("subscription_id")
+        .is_some_and(|value| !value.is_null())
+    {
+        return Err(ApiError::validation("الجلسة الفردية لا ترتبط باشتراك.")
+            .field("subscription_id", "احذف الاشتراك أو اختر نوع جلسة اشتراك."));
     }
 
     let services = resolve_requested_services(transaction, data, current, false).await?;
@@ -1409,34 +1429,19 @@ async fn consume_subscription(
     let subscription = fetch_locked_subscription(transaction, subscription_id).await?;
     if subscription.status != "active" {
         return Err(ApiError::validation("الاشتراك لم يعد صالحًا للاستخدام.")
-            .field("subscription_id", "الاشتراك موقوف أو مكتمل أو ملغي."));
-    }
-    if subscription.plan_type == "monthly" {
-        validate_monthly_subscription(&subscription)?;
-        return Ok(None);
+            .field("subscription_id", "الاشتراك مكتمل أو ملغي."));
     }
     if subscription.sessions_used >= subscription.sessions_count {
         return Err(ApiError::validation("الاشتراك لم يعد صالحًا للاستخدام.")
             .field("subscription_id", "لا توجد جلسات متبقية."));
     }
-    let mut covered = sqlx::query_scalar::<_, u64>(
-        "SELECT service_id FROM subscription_services WHERE subscription_id = ? ORDER BY service_id",
-    )
-    .bind(subscription.id)
-    .fetch_all(&mut **transaction)
-    .await?;
-    let mut selected = sqlx::query_scalar::<_, u64>(
+    let selected = sqlx::query_scalar::<_, u64>(
         "SELECT service_id FROM session_services WHERE session_id = ? ORDER BY service_id",
     )
     .bind(session.id)
     .fetch_all(&mut **transaction)
     .await?;
-    covered.sort_unstable();
-    selected.sort_unstable();
-    if covered != selected {
-        return Err(ApiError::validation("خدمات الجلسة لا تطابق خدمات الاشتراك.")
-            .field("subscription_id", "أعد فتح الجلسة من الاشتراك الصحيح."));
-    }
+    validate_subscription_service_coverage(transaction, subscription.id, selected).await?;
     let result = sqlx::query(
         "INSERT INTO subscription_usages \
          (subscription_id, session_id, type, created_by, created_at, updated_at) \
@@ -1545,7 +1550,7 @@ async fn reverse_closed_effects(
                 .bind(actor_id)
                 .execute(&mut **transaction)
                 .await?;
-                let status = if matches!(subscription.status.as_str(), "stopped" | "cancelled") {
+                let status = if subscription.status == "cancelled" {
                     subscription.status.clone()
                 } else {
                     "active".into()
@@ -1856,19 +1861,75 @@ async fn fetch_locked_subscription(
         .ok_or_else(ApiError::not_found)
 }
 
-fn validate_monthly_subscription(subscription: &SubscriptionRow) -> ApiResult<()> {
-    if subscription.status != "active"
-        || subscription.start_date > time::today()
-        || subscription
-            .end_date
-            .is_some_and(|date| date < time::today())
-    {
+fn validate_session_relationship(session: &SessionRow) -> ApiResult<bool> {
+    match (session.r#type.as_str(), session.subscription_id) {
+        ("subscription", Some(_)) => Ok(true),
+        ("individual", None) => Ok(false),
+        ("subscription", None) => Err(ApiError::internal(
+            "Subscription session is missing its parent subscription.",
+        )),
+        ("individual", Some(_)) => Err(ApiError::internal(
+            "Individual session cannot reference a subscription.",
+        )),
+        _ => Err(ApiError::internal("Unknown session type.")),
+    }
+}
+
+fn validate_subscription_session_financial_input(data: &Map<String, Value>) -> ApiResult<()> {
+    let discount = decimal_field(data, "discount", Decimal::ZERO, "discount")?;
+    if !discount.is_zero() {
         return Err(
-            ApiError::validation("الاشتراك الشهري خارج مدة الصلاحية.").field(
-                "subscription_id",
-                "يجب أن يكون تاريخ اليوم بين بداية الاشتراك ونهايته.",
+            ApiError::validation("جلسة الاشتراك لا تقبل خصمًا أو قيمة مالية مستقلة.")
+                .field("discount", "قيمة جلسة الاشتراك مغطاة بعقد الاشتراك."),
+        );
+    }
+    if data.contains_key("settlement") {
+        return Err(
+            ApiError::validation("جلسة الاشتراك لا تقبل تسوية مالية مستقلة.").field(
+                "settlement",
+                "لا ترسل مدفوعًا أو دينًا أو خصمًا من المحفظة لجلسة الاشتراك.",
             ),
         );
+    }
+    Ok(())
+}
+
+fn validate_subscription_session_update_input(data: &Map<String, Value>) -> ApiResult<()> {
+    if data.contains_key("services")
+        || data.contains_key("service_ids")
+        || data.contains_key("subscription_id")
+    {
+        return Err(
+            ApiError::validation("لا يمكن تغيير خدمات جلسة الاشتراك.").field(
+                "services",
+                "ألغِ الجلسة وأنشئ جلسة صحيحة بدل إضافة خدمات أو تغيير الاشتراك المرتبط.",
+            ),
+        );
+    }
+    Ok(())
+}
+
+async fn validate_subscription_service_coverage(
+    transaction: &mut Transaction<'_, MySql>,
+    subscription_id: u64,
+    selected_service_ids: Vec<u64>,
+) -> ApiResult<()> {
+    let covered_service_ids = sqlx::query_scalar::<_, u64>(
+        "SELECT service_id FROM subscription_services WHERE subscription_id = ?",
+    )
+    .bind(subscription_id)
+    .fetch_all(&mut **transaction)
+    .await?
+    .into_iter()
+    .collect::<HashSet<_>>();
+    if covered_service_ids.is_empty()
+        || selected_service_ids.is_empty()
+        || selected_service_ids
+            .iter()
+            .any(|service_id| !covered_service_ids.contains(service_id))
+    {
+        return Err(ApiError::validation("إحدى الخدمات غير مغطاة بهذا الاشتراك.")
+            .field("services", "اختر خدمات الاشتراك المحددة فقط."));
     }
     Ok(())
 }
@@ -2027,7 +2088,6 @@ mod tests {
         db, schema,
         services::{ledger, subscriptions},
     };
-    use chrono::Duration;
     use sqlx::MySqlPool;
 
     async fn test_pool() -> MySqlPool {
@@ -2059,8 +2119,80 @@ mod tests {
             username: "test".into(),
             password: "test".into(),
             commission_base: CommissionBase::Net,
-            near_end_sessions: 2,
-            near_end_days: 7,
+            subscription_follow_up_sessions: 2,
+        }
+    }
+
+    #[test]
+    fn subscription_sessions_do_not_create_doctor_commission() {
+        let rate = Decimal::from(25);
+        assert!(session_commission(
+            true,
+            CommissionBase::Net,
+            Decimal::from(200),
+            Decimal::from(160),
+            rate,
+        )
+        .is_none());
+
+        let individual = session_commission(
+            false,
+            CommissionBase::Net,
+            Decimal::from(200),
+            Decimal::from(160),
+            rate,
+        )
+        .expect("individual session commission");
+        assert_eq!(individual.rate, rate);
+        assert_eq!(individual.base_amount, Decimal::from(160));
+        assert_eq!(individual.amount, Decimal::from(40));
+    }
+
+    #[test]
+    fn subscription_session_rejects_individual_financial_payloads() {
+        let valid = json!({ "discount": "0.000" });
+        validate_subscription_session_financial_input(valid.as_object().unwrap())
+            .expect("zero discount without settlement is valid");
+
+        for invalid in [
+            json!({ "discount": "1.000" }),
+            json!({
+                "settlement": {
+                    "wallet_amount": "0.000",
+                    "paid_amount": "0.000",
+                    "debt_amount": "0.000",
+                    "method": null
+                }
+            }),
+            json!({
+                "settlement": {
+                    "wallet_amount": "10.000",
+                    "paid_amount": "0.000",
+                    "debt_amount": "0.000",
+                    "method": null
+                }
+            }),
+        ] {
+            assert!(
+                validate_subscription_session_financial_input(invalid.as_object().unwrap())
+                    .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn subscription_session_rejects_service_mutation_payloads() {
+        validate_subscription_session_update_input(json!({ "doctor_id": 7 }).as_object().unwrap())
+            .expect("changing only the supervising doctor is valid");
+
+        for invalid in [
+            json!({ "service_ids": [1, 2] }),
+            json!({ "services": [{ "service_id": 1 }] }),
+            json!({ "subscription_id": 2 }),
+        ] {
+            assert!(
+                validate_subscription_session_update_input(invalid.as_object().unwrap()).is_err()
+            );
         }
     }
 
@@ -2242,157 +2374,273 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "requires an isolated MySQL 8 database"]
-    async fn subscription_sessions_consume_and_restore_only_for_legacy_packages() {
+    async fn subscription_sessions_consume_one_shared_allowance_and_restore_once() {
         let pool = test_pool().await;
-        let (admin_id, receptionist_id, doctor_id, patient_id, service_id, _) = seed(&pool).await;
+        let (admin_id, receptionist_id, doctor_id, patient_id, service_id, addon_service_id) =
+            seed(&pool).await;
 
-        let mut transaction = pool.begin().await.expect("begin legacy subscription");
-        let legacy = subscriptions::create(
+        let mut transaction = pool.begin().await.expect("begin subscription");
+        let created = subscriptions::create(
             &mut transaction,
             &subscriptions::CreateInput {
                 patient_id,
-                plan_type: "legacy_package".into(),
-                amount: None,
-                service_ids: vec![service_id],
-                sessions_count: Some(10),
-                discount: Decimal::ZERO,
+                name: "تأهيل متكامل".into(),
+                service_ids: vec![service_id, addon_service_id],
+                sessions_count: 1,
+                total_price: Decimal::from(800),
                 paid_amount: Decimal::from(800),
                 method: Some("cash".into()),
-                start_date: time::today(),
-                expected_end_date: None,
-                end_date: None,
-                sponsor_id: None,
             },
             receptionist_id,
         )
         .await
-        .expect("create legacy subscription");
-        let legacy_id = legacy.subscription["id"].as_u64().expect("legacy id");
-        transaction
-            .commit()
-            .await
-            .expect("commit legacy subscription");
+        .expect("create subscription");
+        let subscription_id = created.subscription["id"]
+            .as_u64()
+            .expect("subscription id");
+        transaction.commit().await.expect("commit subscription");
 
-        let mut transaction = pool.begin().await.expect("begin legacy session");
-        let legacy_session = create_and_close(
+        let mut transaction = pool.begin().await.expect("begin subscription session");
+        let session = create_and_close(
             &mut transaction,
             &json!({
                 "patient_id": patient_id,
                 "doctor_id": doctor_id,
                 "type": "subscription",
-                "subscription_id": legacy_id,
+                "subscription_id": subscription_id,
+                "services": [
+                    { "service_id": service_id, "item_type": "service", "extra_units": 0 },
+                    { "service_id": addon_service_id, "item_type": "service", "extra_units": 0 }
+                ],
             }),
             receptionist_id,
             &config(),
         )
         .await
-        .expect("close legacy subscription session");
-        let legacy_session_id = legacy_session.session["id"].as_u64().unwrap();
-        assert_eq!(legacy_session.session["net_total"], "80.000");
-        assert!(legacy_session.effects.subscription_usage.is_some());
-        let replay = close(
-            &mut transaction,
-            legacy_session_id,
-            receptionist_id,
-            &config(),
-        )
-        .await
-        .expect("replay close");
+        .expect("close subscription session");
+        let session_id = session.session["id"].as_u64().unwrap();
+        assert_eq!(session.session["net_total"], "0.000");
+        assert_eq!(session.session["services_total"], "0.000");
+        assert!(session.effects.subscription_usage.is_some());
+        assert!(session.effects.wallet_transaction.is_none());
+        assert!(session.effects.payment.is_none());
+        assert!(session.effects.debt.is_none());
+        assert!(session.session["commission_rate"].is_null());
+        assert!(session.session["commission_base_amount"].is_null());
+        assert!(session.session["commission_amount"].is_null());
+        let replay = close(&mut transaction, session_id, receptionist_id, &config())
+            .await
+            .expect("replay close");
         assert!(replay.replayed);
-        transaction.commit().await.expect("commit legacy session");
+        transaction
+            .commit()
+            .await
+            .expect("commit subscription session");
 
         let usage_count = sqlx::query_scalar::<_, u64>(
             "SELECT CAST(COUNT(*) AS UNSIGNED) FROM subscription_usages WHERE session_id = ? AND type = 'consume'",
         )
-        .bind(legacy_session_id)
+        .bind(session_id)
         .fetch_one(&pool)
         .await
         .expect("usage count");
         assert_eq!(usage_count, 1);
-
-        let mut transaction = pool.begin().await.expect("begin legacy cancellation");
-        cancel(
-            &mut transaction,
-            legacy_session_id,
-            "إلغاء جلسة الاشتراك",
-            admin_id,
-        )
-        .await
-        .expect("cancel legacy session");
-        transaction
-            .commit()
-            .await
-            .expect("commit legacy cancellation");
-        let legacy_row =
+        let completed =
             sqlx::query_as::<_, SubscriptionRow>("SELECT * FROM subscriptions WHERE id = ?")
-                .bind(legacy_id)
+                .bind(subscription_id)
                 .fetch_one(&pool)
                 .await
-                .expect("legacy subscription row");
-        assert_eq!(legacy_row.sessions_used, 0);
-        assert_eq!(legacy_row.status, "active");
+                .expect("completed subscription");
+        assert_eq!(completed.sessions_used, 1);
+        assert_eq!(completed.status, "completed");
 
-        let mut transaction = pool.begin().await.expect("begin monthly subscription");
-        let monthly = subscriptions::create(
-            &mut transaction,
-            &subscriptions::CreateInput {
-                patient_id,
-                plan_type: "monthly".into(),
-                amount: Some(Decimal::from(600)),
-                service_ids: Vec::new(),
-                sessions_count: None,
-                discount: Decimal::ZERO,
-                paid_amount: Decimal::from(600),
-                method: Some("cash".into()),
-                start_date: time::today() - Duration::days(1),
-                expected_end_date: None,
-                end_date: Some(time::today() + Duration::days(30)),
-                sponsor_id: None,
-            },
-            receptionist_id,
-        )
-        .await
-        .expect("create monthly subscription");
-        let monthly_id = monthly.subscription["id"].as_u64().expect("monthly id");
-        transaction
-            .commit()
-            .await
-            .expect("commit monthly subscription");
-
-        let mut transaction = pool.begin().await.expect("begin monthly session");
-        let monthly_session = create_and_close(
+        let mut transaction = pool.begin().await.expect("begin excess session");
+        let excess = create_and_close(
             &mut transaction,
             &json!({
                 "patient_id": patient_id,
                 "doctor_id": doctor_id,
                 "type": "subscription",
-                "subscription_id": monthly_id,
-                "service_ids": [service_id],
+                "subscription_id": subscription_id,
+                "services": [{ "service_id": service_id, "item_type": "service", "extra_units": 0 }],
             }),
             receptionist_id,
             &config(),
         )
-        .await
-        .expect("close monthly subscription session");
-        let monthly_session_id = monthly_session.session["id"].as_u64().unwrap();
-        assert!(monthly_session.effects.subscription_usage.is_none());
-        transaction.commit().await.expect("commit monthly session");
+        .await;
+        assert!(excess.is_err());
+        transaction
+            .rollback()
+            .await
+            .expect("rollback excess session");
 
-        let monthly_usage_count = sqlx::query_scalar::<_, u64>(
-            "SELECT CAST(COUNT(*) AS UNSIGNED) FROM subscription_usages WHERE session_id = ?",
+        let mut transaction = pool.begin().await.expect("begin prohibited addition");
+        let prohibited_addition = add_services(
+            &mut transaction,
+            session_id,
+            &json!({
+                "services": [{
+                    "service_id": addon_service_id,
+                    "item_type": "service",
+                    "extra_units": 0,
+                }]
+            }),
+            receptionist_id,
         )
-        .bind(monthly_session_id)
+        .await;
+        assert!(prohibited_addition.is_err());
+        transaction
+            .rollback()
+            .await
+            .expect("rollback prohibited addition");
+        let addition_count = sqlx::query_scalar::<_, u64>(
+            "SELECT CAST(COUNT(*) AS UNSIGNED) FROM session_additions WHERE session_id = ?",
+        )
+        .bind(session_id)
         .fetch_one(&pool)
         .await
-        .expect("monthly usage count");
-        assert_eq!(monthly_usage_count, 0);
+        .expect("subscription addition count");
+        assert_eq!(addition_count, 0);
+
         let session_payment_count = sqlx::query_scalar::<_, u64>(
             "SELECT CAST(COUNT(*) AS UNSIGNED) FROM payments WHERE session_id = ?",
         )
-        .bind(monthly_session_id)
+        .bind(session_id)
         .fetch_one(&pool)
         .await
-        .expect("monthly session payment count");
+        .expect("subscription session payment count");
         assert_eq!(session_payment_count, 0);
+        let debt_count = sqlx::query_scalar::<_, u64>(
+            "SELECT CAST(COUNT(*) AS UNSIGNED) FROM debts WHERE session_id = ?",
+        )
+        .bind(session_id)
+        .fetch_one(&pool)
+        .await
+        .expect("subscription session debt count");
+        assert_eq!(debt_count, 0);
+        let wallet_debit_count = sqlx::query_scalar::<_, u64>(
+            "SELECT CAST(COUNT(*) AS UNSIGNED) FROM wallet_transactions WHERE session_id = ?",
+        )
+        .bind(session_id)
+        .fetch_one(&pool)
+        .await
+        .expect("subscription session wallet movement count");
+        assert_eq!(wallet_debit_count, 0);
+
+        let mut transaction = pool.begin().await.expect("begin subscription cancellation");
+        cancel(&mut transaction, session_id, "إلغاء جلسة الاشتراك", admin_id)
+            .await
+            .expect("cancel subscription session");
+        transaction
+            .commit()
+            .await
+            .expect("commit subscription cancellation");
+        let restored =
+            sqlx::query_as::<_, SubscriptionRow>("SELECT * FROM subscriptions WHERE id = ?")
+                .bind(subscription_id)
+                .fetch_one(&pool)
+                .await
+                .expect("restored subscription");
+        assert_eq!(restored.sessions_used, 0);
+        assert_eq!(restored.status, "active");
+        let restore_count = sqlx::query_scalar::<_, u64>(
+            "SELECT CAST(COUNT(*) AS UNSIGNED) FROM subscription_usages WHERE session_id = ? AND type = 'restore'",
+        )
+        .bind(session_id)
+        .fetch_one(&pool)
+        .await
+        .expect("restore count");
+        assert_eq!(restore_count, 1);
+    }
+
+    #[tokio::test]
+    #[ignore = "requires an isolated MySQL 8 database"]
+    async fn concurrent_subscription_sessions_cannot_exceed_the_shared_allowance() {
+        let pool = test_pool().await;
+        let (_admin_id, receptionist_id, doctor_id, patient_id, service_id, _) = seed(&pool).await;
+
+        let mut transaction = pool.begin().await.expect("begin subscription");
+        let created = subscriptions::create(
+            &mut transaction,
+            &subscriptions::CreateInput {
+                patient_id,
+                name: "اشتراك متزامن".into(),
+                service_ids: vec![service_id],
+                sessions_count: 1,
+                total_price: Decimal::from(100),
+                paid_amount: Decimal::from(100),
+                method: Some("cash".into()),
+            },
+            receptionist_id,
+        )
+        .await
+        .expect("create concurrent subscription");
+        let subscription_id = created.subscription["id"].as_u64().unwrap();
+        transaction.commit().await.expect("commit subscription");
+
+        let payload = json!({
+            "patient_id": patient_id,
+            "doctor_id": doctor_id,
+            "type": "subscription",
+            "subscription_id": subscription_id,
+            "services": [{ "service_id": service_id, "item_type": "service", "extra_units": 0 }],
+        });
+        let first_pool = pool.clone();
+        let first_payload = payload.clone();
+        let first = async move {
+            let mut transaction = first_pool.begin().await.expect("begin first request");
+            let result =
+                create_and_close(&mut transaction, &first_payload, receptionist_id, &config())
+                    .await;
+            if result.is_ok() {
+                transaction.commit().await.expect("commit first request");
+            } else {
+                transaction
+                    .rollback()
+                    .await
+                    .expect("rollback first request");
+            }
+            result
+        };
+        let second_pool = pool.clone();
+        let second = async move {
+            let mut transaction = second_pool.begin().await.expect("begin second request");
+            let result =
+                create_and_close(&mut transaction, &payload, receptionist_id, &config()).await;
+            if result.is_ok() {
+                transaction.commit().await.expect("commit second request");
+            } else {
+                transaction
+                    .rollback()
+                    .await
+                    .expect("rollback second request");
+            }
+            result
+        };
+        let (first_result, second_result) = tokio::join!(first, second);
+        assert_eq!(
+            [first_result.is_ok(), second_result.is_ok()]
+                .into_iter()
+                .filter(|success| *success)
+                .count(),
+            1
+        );
+
+        let subscription =
+            sqlx::query_as::<_, SubscriptionRow>("SELECT * FROM subscriptions WHERE id = ?")
+                .bind(subscription_id)
+                .fetch_one(&pool)
+                .await
+                .expect("load concurrent subscription");
+        assert_eq!(subscription.sessions_used, 1);
+        assert_eq!(subscription.status, "completed");
+        let session_count = sqlx::query_scalar::<_, u64>(
+            "SELECT CAST(COUNT(*) AS UNSIGNED) FROM sessions WHERE subscription_id = ? AND status = 'closed'",
+        )
+        .bind(subscription_id)
+        .fetch_one(&pool)
+        .await
+        .expect("count concurrent subscription sessions");
+        assert_eq!(session_count, 1);
     }
 }

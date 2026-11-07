@@ -160,6 +160,12 @@ const navigation = [
     roles: ["admin"],
   },
   {
+    label: "المشتريات والإيجار",
+    icon: "mdi-receipt-text-minus-outline",
+    to: "/expenses",
+    roles: ["admin"],
+  },
+  {
     label: "التقارير",
     icon: "mdi-chart-box-outline",
     to: "/reports/sessions",

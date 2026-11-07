@@ -11,14 +11,6 @@ dist/
 .codex/
 tmp/
 
-backend/vendor/
-backend/.env
-backend/database/*.sqlite
-backend/storage/logs/*
-backend/storage/framework/cache/data/*
-backend/storage/framework/sessions/*
-backend/storage/framework/views/*
-
 src-tauri/target/
 src-tauri/resources/runtime/*
 !src-tauri/resources/runtime/README.md

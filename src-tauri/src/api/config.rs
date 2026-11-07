@@ -8,8 +8,7 @@ pub struct ApiConfig {
     pub username: String,
     pub password: String,
     pub commission_base: CommissionBase,
-    pub near_end_sessions: u32,
-    pub near_end_days: i64,
+    pub subscription_follow_up_sessions: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

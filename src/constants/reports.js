@@ -1,4 +1,5 @@
 import { labelFor } from '@/constants/labels'
+import { formatMoney } from '@/composables/useMoney'
 
 const dateFormatter = new Intl.DateTimeFormat('ar-LY-u-nu-latn', {
   dateStyle: 'medium',
@@ -13,6 +14,9 @@ const dateTimeFormatter = new Intl.DateTimeFormat('ar-LY-u-nu-latn', {
 
 const nameOf = (value) => value?.name || '—'
 const serviceNames = (row) => (row.services || []).map((service) => service.name).filter(Boolean).join('، ') || '—'
+const supervisedSessions = (row) => (row.supervised_sessions || [])
+  .map((session) => `${session.code || `#${session.id}`} — ${nameOf(session.doctor)}`)
+  .join('؛ ') || '—'
 
 export const reportTypes = [
   {
@@ -92,29 +96,48 @@ export const reportTypes = [
   {
     value: 'subscriptions',
     title: 'تقرير الاشتراكات',
-    description: 'الاشتراكات الشهرية ومددها وقيمها وحالاتها.',
+    description: 'الاشتراكات وقيمها والجلسات المستفاد منها والطبيب المشرف على كل جلسة.',
     icon: 'mdi-wallet-membership',
     columns: [
-      { key: 'patient', label: 'المريض', value: (row) => nameOf(row.patient), width: 20 },
-      { key: 'plan_type', label: 'النوع', kind: 'enum', labelGroup: 'subscriptionPlan', width: 13 },
-      { key: 'start_date', label: 'البداية', kind: 'date', width: 14 },
-      { key: 'end_date', label: 'النهاية', kind: 'date', value: (row) => row.end_date || row.expected_end_date, width: 14 },
-      {
-        key: 'remaining_display',
-        label: 'المتبقي',
-        value: (row) => row.plan_type === 'monthly'
-          ? `${row.remaining_days ?? 0} يوم`
-          : `${row.remaining ?? 0} جلسة`,
-        width: 15,
-      },
-      { key: 'net_total', label: 'القيمة', kind: 'money', width: 12 },
+      { key: 'patient', label: 'المريض', value: (row) => nameOf(row.patient), width: 14 },
+      { key: 'name', label: 'الاشتراك', width: 14 },
+      { key: 'start_date', label: 'البداية', kind: 'date', width: 11 },
+      { key: 'remaining_display', label: 'المتبقي', value: (row) => `${row.remaining ?? 0} جلسة`, width: 10 },
+      { key: 'supervised_sessions', label: 'الجلسات والطبيب المشرف', value: supervisedSessions, width: 22 },
+      { key: 'total_price', label: 'سعر الاشتراك', kind: 'money', width: 20 },
       { key: 'status', label: 'الحالة', kind: 'status', statusType: 'subscription', width: 12 },
     ],
     totals: [
       { key: 'count', label: 'عدد الاشتراكات' },
       { key: 'active', label: 'الاشتراكات النشطة' },
+      { key: 'completed', label: 'الاشتراكات المكتملة' },
+      { key: 'cancelled', label: 'الاشتراكات الملغاة' },
       { key: 'remaining_sessions', label: 'الجلسات المتبقية' },
-      { key: 'net_total', label: 'قيمة الاشتراكات', money: true },
+      { key: 'received_amount', label: 'إجمالي المحصل', money: true },
+      { key: 'refunded_amount', label: 'إجمالي المسترجع', money: true },
+      { key: 'outstanding_amount', label: 'إجمالي المستحق', money: true },
+    ],
+  },
+  {
+    value: 'expenses',
+    title: 'تقرير المشتريات والإيجار',
+    description: 'المشتريات ودفعات الإيجار المدفوعة فعليًا مع حالة كل سجل.',
+    icon: 'mdi-receipt-text-minus-outline',
+    columns: [
+      { key: 'payment_date', label: 'التاريخ', kind: 'date', width: 12 },
+      { key: 'type', label: 'النوع', kind: 'enum', labelGroup: 'expenseType', width: 10 },
+      { key: 'description', label: 'الوصف', width: 19 },
+      { key: 'recipient', label: 'المستلم', width: 15 },
+      { key: 'reference_number', label: 'المرجع', width: 12 },
+      { key: 'payment_method', label: 'طريقة الدفع', kind: 'enum', labelGroup: 'paymentMethod', width: 12 },
+      { key: 'amount', label: 'المبلغ', kind: 'money', width: 12 },
+      { key: 'status', label: 'الحالة', kind: 'status', statusType: 'expense', width: 8 },
+    ],
+    totals: [
+      { key: 'count', label: 'عدد العمليات' },
+      { key: 'total_purchases', label: 'إجمالي المشتريات', money: true },
+      { key: 'total_rent', label: 'إجمالي الإيجار', money: true },
+      { key: 'total_expenses', label: 'إجمالي المصروفات', money: true },
     ],
   },
 ]
@@ -133,6 +156,7 @@ export function reportCellLabel(column, row) {
   if (column.kind === 'date') return formatReportDate(value)
   if (column.kind === 'enum') return labelFor(column.labelGroup, value)
   if (column.kind === 'reference') return `#${value}`
+  if (column.kind === 'money') return formatMoney(value)
   return String(value)
 }
 

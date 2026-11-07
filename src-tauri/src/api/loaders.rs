@@ -176,7 +176,7 @@ async fn subscription_with_relations(
     pool: &MySqlPool,
     subscription: &SubscriptionRow,
     include_patient: bool,
-    include_sponsor: bool,
+    _include_sponsor: bool,
 ) -> ApiResult<Value> {
     let patient = if include_patient {
         let patient = sqlx::query_as::<_, PatientRow>("SELECT * FROM patients WHERE id = ?")
@@ -184,25 +184,6 @@ async fn subscription_with_relations(
             .fetch_one(pool)
             .await?;
         Some(patient_summary(&patient))
-    } else {
-        None
-    };
-    let sponsor = if include_sponsor {
-        Some(match subscription.sponsor_id {
-            Some(id) => sqlx::query("SELECT id, name FROM sponsors WHERE id = ?")
-                .bind(id)
-                .fetch_optional(pool)
-                .await?
-                .map(|row| -> Result<Value, sqlx::Error> {
-                    Ok(json!({
-                        "id": row.try_get::<u64, _>("id")?,
-                        "name": row.try_get::<String, _>("name")?,
-                    }))
-                })
-                .transpose()?
-                .unwrap_or(Value::Null),
-            None => Value::Null,
-        })
     } else {
         None
     };
@@ -215,13 +196,45 @@ async fn subscription_with_relations(
     .iter()
     .map(resources::subscription_service_value)
     .collect::<Vec<_>>();
+    let (received_amount, refunded_amount) =
+        subscription_financial_summary(pool, subscription.id).await?;
 
     Ok(resources::subscription_value(
         subscription,
         patient,
-        sponsor,
         Some(services),
+        received_amount,
+        refunded_amount,
     ))
+}
+
+async fn subscription_financial_summary(
+    pool: &MySqlPool,
+    subscription_id: u64,
+) -> ApiResult<(Decimal, Decimal)> {
+    let received = sqlx::query_scalar::<_, Decimal>(
+        "SELECT COALESCE(SUM(source.amount), 0) FROM (\
+            SELECT p.amount AS amount FROM payments p \
+            WHERE p.subscription_id = ? AND p.type = 'subscription_payment' AND p.amount > 0 \
+            UNION ALL \
+            SELECT pa.amount AS amount FROM payment_allocations pa \
+            INNER JOIN payments p ON p.id = pa.payment_id AND p.type = 'debt_payment' \
+            INNER JOIN debts d ON d.id = pa.debt_id \
+            WHERE d.subscription_id = ?\
+        ) source",
+    )
+    .bind(subscription_id)
+    .bind(subscription_id)
+    .fetch_one(pool)
+    .await?;
+    let refunded = sqlx::query_scalar::<_, Decimal>(
+        "SELECT COALESCE(SUM(ABS(amount)), 0) FROM payments \
+         WHERE subscription_id = ? AND type = 'refund' AND amount < 0",
+    )
+    .bind(subscription_id)
+    .fetch_one(pool)
+    .await?;
+    Ok((received, refunded))
 }
 
 pub async fn wallet_balance(pool: &MySqlPool, patient_id: u64) -> ApiResult<Decimal> {
@@ -249,8 +262,7 @@ pub async fn debt_total(pool: &MySqlPool, patient_id: u64) -> ApiResult<Decimal>
 pub async fn has_usable_subscription(pool: &MySqlPool, patient_id: u64) -> ApiResult<bool> {
     let count = sqlx::query_scalar::<_, u64>(
         "SELECT CAST(COUNT(*) AS UNSIGNED) FROM subscriptions \
-         WHERE patient_id = ? AND status = 'active' \
-           AND (plan_type = 'legacy_package' OR (plan_type = 'monthly' AND start_date <= CURDATE() AND end_date >= CURDATE()))",
+         WHERE patient_id = ? AND status = 'active' AND sessions_used < sessions_count",
     )
     .bind(patient_id)
     .fetch_one(pool)

@@ -366,8 +366,7 @@ fn database_api_config(context: &RuntimeContext, database: &str, use_root: bool)
         username,
         password,
         commission_base: api::config::CommissionBase::from_env(),
-        near_end_sessions: 2,
-        near_end_days: 7,
+        subscription_follow_up_sessions: 2,
     }
 }
 
@@ -463,8 +462,7 @@ pub fn start_rust_api(state: &DesktopState) -> Result<(), String> {
             username: config.app_user,
             password: config.app_password,
             commission_base: api::config::CommissionBase::from_env(),
-            near_end_sessions: 2,
-            near_end_days: 7,
+            subscription_follow_up_sessions: 2,
         }
     };
 
@@ -1168,6 +1166,7 @@ mod tests {
         },
     };
     use bcrypt::verify;
+    use rust_decimal::Decimal;
     use std::{
         fs,
         io::{Read, Write},
@@ -1262,7 +1261,15 @@ mod tests {
         let verify_user = app_user.clone();
         let verify_password = app_password.clone();
         let host = std::env::var("RUST_MYSQL_HOST").unwrap_or_else(|_| "127.0.0.1".into());
-        let (role, password_hash, clinic_name, settings_count) = run_async_operation(
+        let (
+            role,
+            password_hash,
+            clinic_name,
+            settings_count,
+            subscription,
+            payment_amount,
+            debt_amount,
+        ) = run_async_operation(
             async move {
                 let pool = api::db::connect_database(
                     &host,
@@ -1272,8 +1279,8 @@ mod tests {
                     &verify_password,
                 )
                 .await?;
-                let user = sqlx::query_as::<_, (String, String)>(
-                    "SELECT role, password FROM users WHERE username = 'admin-rust'",
+                let user = sqlx::query_as::<_, (u64, String, String)>(
+                    "SELECT id, role, password FROM users WHERE username = 'admin-rust'",
                 )
                 .fetch_one(&pool)
                 .await
@@ -1284,8 +1291,58 @@ mod tests {
                 .fetch_one(&pool)
                 .await
                 .map_err(|error| error.to_string())?;
+                let patient_id = sqlx::query(
+                    "INSERT INTO patients \
+                     (name, phone, age, gender, is_active, created_by, created_at, updated_at) \
+                     VALUES ('مريض التهيئة', '0911111111', 30, 'male', 1, ?, NOW(), NOW())",
+                )
+                .bind(user.0)
+                .execute(&pool)
+                .await
+                .map_err(|error| error.to_string())?
+                .last_insert_id();
+                let service_id = sqlx::query(
+                    "INSERT INTO services \
+                     (name, price, is_active, created_by, created_at, updated_at) \
+                     VALUES ('خدمة التهيئة', 50, 1, ?, NOW(), NOW())",
+                )
+                .bind(user.0)
+                .execute(&pool)
+                .await
+                .map_err(|error| error.to_string())?
+                .last_insert_id();
+                let mut transaction = pool.begin().await.map_err(|error| error.to_string())?;
+                let created = api::services::subscriptions::create(
+                    &mut transaction,
+                    &api::services::subscriptions::CreateInput {
+                        patient_id,
+                        name: "اشتراك بعد التهيئة".into(),
+                        service_ids: vec![service_id],
+                        sessions_count: 6,
+                        total_price: Decimal::from(300),
+                        paid_amount: Decimal::from(100),
+                        method: Some("cash".into()),
+                    },
+                    user.0,
+                )
+                .await
+                .map_err(|error| format!("{}: {:?}", error.message, error.errors))?;
+                transaction
+                    .commit()
+                    .await
+                    .map_err(|error| error.to_string())?;
+                let payment_amount = created.payment.expect("created payment").amount;
+                let debt_amount = created.debt.expect("created debt").amount;
                 pool.close().await;
-                Ok((user.0, user.1, setting.0, setting.1))
+                Ok((
+                    user.1,
+                    user.2,
+                    setting.0,
+                    setting.1,
+                    created.subscription,
+                    payment_amount,
+                    debt_amount,
+                ))
             },
             "test verification timed out",
         )
@@ -1294,6 +1351,13 @@ mod tests {
         assert!(verify("Clinic-test-123", &password_hash).expect("verify bcrypt hash"));
         assert_eq!(clinic_name, "عيادة الاختبار");
         assert_eq!(settings_count, 1);
+        assert_eq!(subscription["name"], "اشتراك بعد التهيئة");
+        assert_eq!(subscription["sessions_count"], 6);
+        assert_eq!(subscription["total_price"], "300.000");
+        assert_eq!(subscription["received_amount"], "100.000");
+        assert_eq!(subscription["outstanding_amount"], "200.000");
+        assert_eq!(payment_amount, Decimal::from(100));
+        assert_eq!(debt_amount, Decimal::from(200));
 
         let error = activate_new_database(&context, request)
             .expect_err("second activation must preserve the existing database");

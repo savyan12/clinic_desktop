@@ -19,8 +19,6 @@ export const auditActionLabels = Object.freeze({
   service_updated: 'تعديل خدمة',
   service_price_changed: 'تغيير سعر خدمة',
   subscription_created: 'إنشاء اشتراك',
-  subscription_stopped: 'إيقاف اشتراك',
-  subscription_reactivated: 'إعادة تفعيل اشتراك',
   subscription_cancelled: 'إلغاء اشتراك',
   subscription_corrected: 'تصحيح اشتراك',
   sponsor_created: 'إضافة جهة راعية',
@@ -36,6 +34,9 @@ export const auditActionLabels = Object.freeze({
   opening_debt_created: 'تسجيل دين افتتاحي',
   debt_payment_recorded: 'تسجيل دفعة دين',
   debt_settled: 'تسوية دين',
+  expense_created: 'تسجيل مصروف',
+  expense_corrected: 'تصحيح مصروف',
+  expense_cancelled: 'إلغاء مصروف',
 })
 
 export const auditEntityLabels = Object.freeze({
@@ -55,6 +56,7 @@ export const auditEntityLabels = Object.freeze({
   payment_allocation: 'تخصيص دفعة',
   wallet_transaction: 'حركة رصيد',
   debt: 'دين',
+  expense: 'مصروف إداري',
   setting: 'إعدادات',
   settings: 'إعدادات',
   audit_log: 'سجل تدقيق',
@@ -109,7 +111,6 @@ export const auditFieldLabels = Object.freeze({
   refund_payment_id: 'دفعة الاسترجاع',
   reverses_payment_id: 'الدفعة الأصلية',
   debt_id: 'الدين',
-  replacement_debt_id: 'الدين البديل',
   reverses_transaction_id: 'حركة الرصيد الأصلية',
   reverses_usage_id: 'استخدام الاشتراك الأصلي',
   created_by: 'أنشأه المستخدم',
@@ -130,21 +131,32 @@ export const auditFieldLabels = Object.freeze({
   kind: 'نوع الدين',
   method: 'طريقة الدفع',
   payment_method: 'طريقة الدفع',
+  description: 'الوصف',
+  recipient: 'المستلم',
+  reference_number: 'رقم المرجع',
+  rent_period: 'فترة الإيجار',
+  rent_month: 'شهر الإيجار',
+  rent_start_date: 'بداية فترة الإيجار',
+  rent_end_date: 'نهاية فترة الإيجار',
+  notes: 'ملاحظات',
+  payment_date: 'تاريخ الدفع',
   coverage: 'طريقة التغطية',
-  plan_type: 'نوع الاشتراك',
-  scheduled_weekdays: 'أيام حضور الاشتراك',
   item_type: 'نوع البند',
   price: 'السعر',
   base_price: 'السعر الأساسي',
   extra_unit_price: 'سعر الوحدة الإضافية',
   amount: 'المبلغ',
   base_amount: 'المبلغ الأساسي',
-  base_total: 'الإجمالي الأساسي',
+  total_price: 'سعر الاشتراك الإجمالي',
   services_total: 'إجمالي الخدمات',
   discount: 'الخصم',
   net_total: 'الإجمالي الصافي',
   paid_amount: 'المبلغ المدفوع',
-  paid_total: 'إجمالي المدفوع',
+  received_amount: 'إجمالي المحصل',
+  refunded_amount: 'إجمالي المسترجع',
+  outstanding_amount: 'الرصيد المستحق',
+  retained_amount: 'صافي المحتفظ به',
+  maximum_refund: 'الحد الأقصى للاسترجاع',
   wallet_amount: 'المبلغ من الرصيد',
   debt_amount: 'مبلغ الدين',
   refund_amount: 'مبلغ الاسترجاع',
@@ -154,7 +166,6 @@ export const auditFieldLabels = Object.freeze({
   debt_total: 'إجمالي الدين',
   debt_paid: 'الدين المسدد',
   remaining: 'المبلغ المتبقي',
-  remaining_amount: 'المبلغ المتبقي',
   all_time_remaining: 'إجمالي المستحق المتبقي',
   doctor_dues_remaining: 'مستحقات الطبيب المتبقية',
   total_due: 'إجمالي المستحق',
@@ -185,8 +196,6 @@ export const auditFieldLabels = Object.freeze({
   sessions_used: 'الجلسات المستخدمة',
   sessions_remaining: 'الجلسات المتبقية',
   start_date: 'تاريخ البداية',
-  expected_end_date: 'تاريخ الانتهاء المتوقع',
-  end_date: 'تاريخ الانتهاء',
   included_units: 'الوحدات المشمولة',
   extra_units: 'الوحدات الإضافية',
   total_units: 'إجمالي الوحدات',
@@ -196,7 +205,6 @@ export const auditFieldLabels = Object.freeze({
   allocations: 'تخصيصات الدفعة',
   preview: 'ملخص الإلغاء',
   refund: 'الاسترجاع',
-  replacement_debt: 'الدين البديل',
   debts_to_void: 'الديون المطلوب إلغاؤها',
   effects: 'الآثار المالية',
   replacement: 'العملية البديلة',
@@ -212,14 +220,7 @@ export const auditFieldLabels = Object.freeze({
   commission_adjusted: 'تعديل العمولة',
   net_delta: 'فرق الصافي',
   commission_delta: 'فرق العمولة',
-  period_days: 'أيام مدة الاشتراك',
-  elapsed_days: 'الأيام المستخدمة',
-  remaining_days: 'الأيام المتبقية',
-  per_session_value: 'قيمة الجلسة',
-  consumed_value: 'القيمة المستهلكة',
-  debt_voided_amount: 'قيمة الديون الملغاة',
-  replacement_debt_amount: 'قيمة الدين البديل',
-  source_payment_ids: 'الدفعات الأصلية',
+  supervising_doctor_updated: 'تحديث الطبيب المشرف',
   tokens_revoked: 'إلغاء جلسات الدخول',
   historical_financial_rows_changed: 'تغيير السجلات المالية السابقة',
   replayed: 'عملية مكررة',
@@ -235,14 +236,11 @@ const auditValueLabels = Object.freeze({
   cancelled: 'ملغاة',
   active: 'نشط',
   completed: 'مكتمل',
-  stopped: 'موقوف',
   partial: 'مسدد جزئيًا',
   paid: 'مسدد',
   void: 'ملغى',
   individual: 'فردية',
   subscription: 'اشتراك',
-  monthly: 'اشتراك شهري',
-  legacy_package: 'باقة جلسات',
   session: 'جلسة',
   opening: 'افتتاحي',
   session_payment: 'دفعة جلسة',
@@ -263,12 +261,15 @@ const auditValueLabels = Object.freeze({
   restore: 'استعادة',
   service: 'خدمة',
   extra_units: 'وحدات إضافية',
+  purchase: 'مشتريات',
+  rent: 'إيجار',
 })
 
 const statusValueLabels = Object.freeze({
   session: { open: 'مفتوحة', closed: 'مغلقة', cancelled: 'ملغاة' },
-  subscription: { active: 'نشط', completed: 'مكتمل', stopped: 'موقوف', cancelled: 'ملغي' },
+  subscription: { active: 'نشط', completed: 'مكتمل', cancelled: 'ملغي' },
   debt: { open: 'مفتوح', partial: 'مسدد جزئيًا', paid: 'مسدد', void: 'ملغى' },
+  expense: { active: 'نشط', cancelled: 'ملغي' },
 })
 
 const actionSuffixes = [
@@ -296,6 +297,7 @@ const auditEntityFilterKeys = [
   'payment',
   'wallet_transaction',
   'debt',
+  'expense',
   'settings',
 ]
 
@@ -303,6 +305,7 @@ const booleanFields = new Set([
   'is_active',
   'show_logo',
   'is_addition',
+  'supervising_doctor_updated',
   'commission_adjusted',
   'tokens_revoked',
   'historical_financial_rows_changed',
@@ -313,14 +316,18 @@ const moneyFields = new Set([
   'amount',
   'base_amount',
   'base_price',
-  'base_total',
+  'total_price',
   'price',
   'extra_unit_price',
   'services_total',
   'discount',
   'net_total',
   'paid_amount',
-  'paid_total',
+  'received_amount',
+  'refunded_amount',
+  'outstanding_amount',
+  'retained_amount',
+  'maximum_refund',
   'wallet_amount',
   'debt_amount',
   'refund_amount',
@@ -330,23 +337,18 @@ const moneyFields = new Set([
   'debt_total',
   'debt_paid',
   'remaining',
-  'remaining_amount',
   'all_time_remaining',
   'doctor_dues_remaining',
   'total_due',
   'total_paid',
   'commission_base_amount',
   'commission_amount',
-  'per_session_value',
-  'consumed_value',
-  'debt_voided_amount',
-  'replacement_debt_amount',
   'net_delta',
   'commission_delta',
 ])
 
 const percentageFields = new Set(['commission_rate', 'rate'])
-const enumFields = new Set(['role', 'gender', 'status', 'type', 'kind', 'method', 'payment_method', 'coverage', 'plan_type', 'item_type'])
+const enumFields = new Set(['role', 'gender', 'status', 'type', 'kind', 'method', 'payment_method', 'coverage', 'item_type'])
 const hiddenFields = new Set(['password', 'password_confirmation', 'remember_token', 'token'])
 const relationFields = new Set(['patient', 'doctor', 'sponsor', 'creator', 'services'])
 
@@ -485,13 +487,6 @@ export function formatAuditTimestamp(value) {
 export function formatAuditValue(value, path = '', entityType = '') {
   const field = fieldName(path)
   if (!hasValue(value)) return '—'
-
-  if (field === 'scheduled_weekdays') {
-    const weekdayLabels = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس']
-    const values = Array.isArray(value) ? value : [value]
-    const labels = values.map((item) => weekdayLabels[Number(item)]).filter(Boolean)
-    return labels.length ? labels.join('، ') : '—'
-  }
 
   if (Array.isArray(value)) {
     if (!value.length) return '—'

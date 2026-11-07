@@ -27,7 +27,6 @@ pub struct ReportQuery {
     pub kind: Option<String>,
     pub r#type: Option<String>,
     pub method: Option<String>,
-    pub near_end: Option<bool>,
     pub format: Option<String>,
 }
 
@@ -96,7 +95,6 @@ impl From<&ReportQuery> for ReportFilters {
             kind: query.kind.clone().filter(|value| !value.is_empty()),
             r#type: query.r#type.clone().filter(|value| !value.is_empty()),
             method: query.method.clone().filter(|value| !value.is_empty()),
-            near_end: query.near_end.unwrap_or(false),
         }
     }
 }

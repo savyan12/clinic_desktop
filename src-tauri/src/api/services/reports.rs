@@ -1,14 +1,14 @@
 use crate::api::{
     error::{ApiError, ApiResult},
-    loaders, money,
+    loaders, money, resources,
     rows::{
-        DebtRow, DoctorRow, PatientRow, PaymentRow, SessionRow, SessionServiceRow, SponsorRow,
-        SubscriptionRow, SubscriptionServiceRow,
+        AdministrativeExpenseRow, DebtRow, DoctorRow, PatientRow, PaymentRow, SessionRow,
+        SessionServiceRow, SponsorRow, SubscriptionRow,
     },
-    time, AppState,
+    time, validation, AppState,
 };
 use axum::http::StatusCode;
-use chrono::{Duration, NaiveDate, Utc};
+use chrono::{NaiveDate, Utc};
 use rust_decimal::Decimal;
 use serde_json::{json, Value};
 
@@ -23,7 +23,6 @@ pub struct ReportFilters {
     pub kind: Option<String>,
     pub r#type: Option<String>,
     pub method: Option<String>,
-    pub near_end: bool,
 }
 
 pub async fn report(
@@ -37,6 +36,7 @@ pub async fn report(
         "debts" => debts(state, filters).await?,
         "doctor-dues" => doctor_dues(state, filters).await?,
         "subscriptions" => subscriptions(state, filters).await?,
+        "expenses" => expenses(state, filters).await?,
         _ => {
             return Err(ApiError::new(
                 StatusCode::NOT_FOUND,
@@ -57,6 +57,65 @@ pub async fn report(
             }),
         );
     Ok(report)
+}
+
+async fn expenses(state: &AppState, filters: &ReportFilters) -> ApiResult<Value> {
+    if let Some(value) = filters.r#type.as_deref() {
+        validation::one_of(value, &["purchase", "rent"], "type")?;
+    }
+    if let Some(value) = filters.method.as_deref() {
+        validation::one_of(value, &["cash", "transfer"], "method")?;
+    }
+    if let Some(value) = filters.status.as_deref() {
+        validation::one_of(value, &["active", "cancelled"], "status")?;
+    }
+
+    let rows = sqlx::query_as::<_, AdministrativeExpenseRow>(
+        "SELECT * FROM administrative_expenses \
+         WHERE (? IS NULL OR payment_date >= ?) \
+           AND (? IS NULL OR payment_date <= ?) \
+           AND (? IS NULL OR `type` = ?) \
+           AND (? IS NULL OR payment_method = ?) \
+           AND (? IS NULL OR status = ?) \
+         ORDER BY payment_date DESC, id DESC",
+    )
+    .bind(filters.from)
+    .bind(filters.from)
+    .bind(filters.to)
+    .bind(filters.to)
+    .bind(&filters.r#type)
+    .bind(&filters.r#type)
+    .bind(&filters.method)
+    .bind(&filters.method)
+    .bind(&filters.status)
+    .bind(&filters.status)
+    .fetch_all(&state.pool)
+    .await?;
+
+    let mut count = 0usize;
+    let mut total_purchases = Decimal::ZERO;
+    let mut total_rent = Decimal::ZERO;
+    for expense in &rows {
+        if expense.status != "active" {
+            continue;
+        }
+        count += 1;
+        match expense.r#type.as_str() {
+            "purchase" => total_purchases += expense.amount,
+            "rent" => total_rent += expense.amount,
+            _ => {}
+        }
+    }
+
+    Ok(json!({
+        "rows": rows.iter().map(resources::administrative_expense_value).collect::<Vec<_>>(),
+        "totals": {
+            "count": count,
+            "total_purchases": money::normalize(total_purchases),
+            "total_rent": money::normalize(total_rent),
+            "total_expenses": money::normalize(total_purchases + total_rent),
+        },
+    }))
 }
 
 async fn sessions(state: &AppState, filters: &ReportFilters) -> ApiResult<Value> {
@@ -85,7 +144,7 @@ async fn sessions(state: &AppState, filters: &ReportFilters) -> ApiResult<Value>
     let mut values = Vec::with_capacity(rows.len());
     let mut service_value = Decimal::ZERO;
     for session in &rows {
-        if session.status == "closed" {
+        if session.status == "closed" && session.r#type == "individual" {
             service_value += session.net_total;
         }
         let patient = patient(state, session.patient_id).await?;
@@ -132,10 +191,8 @@ async fn collections(state: &AppState, filters: &ReportFilters) -> ApiResult<Val
            AND (? IS NULL OR \
                 EXISTS (SELECT 1 FROM payment_allocations pa INNER JOIN debts d ON d.id = pa.debt_id WHERE pa.payment_id = p.id AND d.sponsor_id = ?) \
                 OR EXISTS (SELECT 1 FROM sessions s WHERE s.id = p.session_id AND s.sponsor_id = ?) \
-                OR EXISTS (SELECT 1 FROM subscriptions sub WHERE sub.id = p.subscription_id AND sub.sponsor_id = ?) \
                 OR EXISTS (SELECT 1 FROM payments original INNER JOIN payment_allocations pa ON pa.payment_id = original.id INNER JOIN debts d ON d.id = pa.debt_id WHERE original.id = p.reverses_payment_id AND d.sponsor_id = ?) \
-                OR EXISTS (SELECT 1 FROM payments original INNER JOIN sessions s ON s.id = original.session_id WHERE original.id = p.reverses_payment_id AND s.sponsor_id = ?) \
-                OR EXISTS (SELECT 1 FROM payments original INNER JOIN subscriptions sub ON sub.id = original.subscription_id WHERE original.id = p.reverses_payment_id AND sub.sponsor_id = ?)) \
+                OR EXISTS (SELECT 1 FROM payments original INNER JOIN sessions s ON s.id = original.session_id WHERE original.id = p.reverses_payment_id AND s.sponsor_id = ?)) \
          ORDER BY p.id DESC",
     )
     .bind(filters.from)
@@ -148,8 +205,6 @@ async fn collections(state: &AppState, filters: &ReportFilters) -> ApiResult<Val
     .bind(payment_type)
     .bind(method)
     .bind(method)
-    .bind(filters.sponsor_id)
-    .bind(filters.sponsor_id)
     .bind(filters.sponsor_id)
     .bind(filters.sponsor_id)
     .bind(filters.sponsor_id)
@@ -272,7 +327,7 @@ async fn doctor_dues(state: &AppState, filters: &ReportFilters) -> ApiResult<Val
     for doctor in &doctors {
         let sessions_count = sqlx::query_scalar::<_, u64>(
             "SELECT CAST(COUNT(*) AS UNSIGNED) FROM sessions \
-             WHERE doctor_id = ? AND status = 'closed' \
+             WHERE doctor_id = ? AND type = 'individual' AND status = 'closed' AND commission_amount IS NOT NULL \
                AND (? IS NULL OR DATE(closed_at) >= ?) \
                AND (? IS NULL OR DATE(closed_at) <= ?)",
         )
@@ -285,7 +340,7 @@ async fn doctor_dues(state: &AppState, filters: &ReportFilters) -> ApiResult<Val
         .await?;
         let earned = sqlx::query_scalar::<_, Option<Decimal>>(
             "SELECT SUM(commission_amount) FROM sessions \
-             WHERE doctor_id = ? AND status = 'closed' \
+             WHERE doctor_id = ? AND type = 'individual' AND status = 'closed' AND commission_amount IS NOT NULL \
                AND (? IS NULL OR DATE(closed_at) >= ?) \
                AND (? IS NULL OR DATE(closed_at) <= ?)",
         )
@@ -337,18 +392,22 @@ async fn doctor_dues(state: &AppState, filters: &ReportFilters) -> ApiResult<Val
 
 async fn subscriptions(state: &AppState, filters: &ReportFilters) -> ApiResult<Value> {
     let status = filters.status.as_deref();
-    let near_date = time::today() + Duration::days(state.config.near_end_days);
     let rows = sqlx::query_as::<_, SubscriptionRow>(
-        "SELECT * FROM subscriptions \
-         WHERE (? IS NULL OR start_date >= ?) \
-           AND (? IS NULL OR start_date <= ?) \
-           AND (? IS NULL OR patient_id = ?) \
-           AND (? IS NULL OR status = ?) \
-           AND (? = 0 OR (status = 'active' AND ( \
-               (plan_type = 'legacy_package' AND ((sessions_count - sessions_used) <= ? OR expected_end_date <= ?)) \
-               OR (plan_type = 'monthly' AND end_date <= ?) \
-           ))) \
-         ORDER BY id DESC",
+        "SELECT sub.* FROM subscriptions sub \
+         WHERE (? IS NULL OR sub.start_date >= ?) \
+           AND (? IS NULL OR sub.start_date <= ?) \
+           AND (? IS NULL OR sub.patient_id = ?) \
+           AND (? IS NULL OR EXISTS ( \
+               SELECT 1 FROM sessions supervised \
+               WHERE supervised.subscription_id = sub.id \
+                 AND supervised.type = 'subscription' \
+                 AND supervised.status IN ('closed','cancelled') \
+                 AND supervised.doctor_id = ? \
+                 AND (? IS NULL OR DATE(supervised.opened_at) >= ?) \
+                 AND (? IS NULL OR DATE(supervised.opened_at) <= ?) \
+           )) \
+           AND (? IS NULL OR sub.status = ?) \
+         ORDER BY sub.id DESC",
     )
     .bind(filters.from)
     .bind(filters.from)
@@ -356,74 +415,154 @@ async fn subscriptions(state: &AppState, filters: &ReportFilters) -> ApiResult<V
     .bind(filters.to)
     .bind(filters.patient_id)
     .bind(filters.patient_id)
+    .bind(filters.doctor_id)
+    .bind(filters.doctor_id)
+    .bind(filters.from)
+    .bind(filters.from)
+    .bind(filters.to)
+    .bind(filters.to)
     .bind(status)
     .bind(status)
-    .bind(filters.near_end)
-    .bind(state.config.near_end_sessions)
-    .bind(near_date)
-    .bind(near_date)
     .fetch_all(&state.pool)
     .await?;
     let mut values = Vec::with_capacity(rows.len());
     let mut active = 0usize;
+    let mut completed = 0usize;
+    let mut cancelled = 0usize;
+    let mut total_sessions = 0u64;
+    let mut used_sessions = 0u64;
+    let mut completed_sessions = 0u64;
     let mut remaining_sessions = 0u64;
-    let mut net_total = Decimal::ZERO;
+    let mut total_value = Decimal::ZERO;
+    let mut received_amount = Decimal::ZERO;
+    let mut refunded_amount = Decimal::ZERO;
+    let mut outstanding_amount = Decimal::ZERO;
     for subscription in &rows {
-        let monthly = subscription.plan_type == "monthly";
-        let remaining = (!monthly).then_some(
-            subscription
-                .sessions_count
-                .saturating_sub(subscription.sessions_used),
-        );
-        let remaining_days = if monthly {
-            subscription.end_date.map(|end| {
-                if end < time::today() {
-                    0
-                } else {
-                    (end - time::today()).num_days() + 1
-                }
-            })
-        } else {
-            None
-        };
-        if subscription.status == "active" {
-            active += 1;
+        match subscription.status.as_str() {
+            "active" => active += 1,
+            "completed" => completed += 1,
+            "cancelled" => cancelled += 1,
+            _ => {}
         }
-        remaining_sessions += u64::from(remaining.unwrap_or(0));
-        net_total += subscription.net_total;
-        let patient = patient(state, subscription.patient_id).await?;
-        let services = subscription_services(state, subscription.id).await?;
-        values.push(json!({
-            "id": subscription.id,
-            "patient_id": subscription.patient_id,
-            "patient": loaders::patient_summary(&patient),
-            "plan_type": subscription.plan_type,
-            "services": services.iter().map(|service| json!({
-                "service_id": service.service_id,
-                "name": service.service_name,
-                "price": money::normalize(service.price),
-            })).collect::<Vec<_>>(),
-            "sessions_count": if monthly { Value::Null } else { json!(subscription.sessions_count) },
-            "sessions_used": if monthly { Value::Null } else { json!(subscription.sessions_used) },
-            "remaining": remaining,
-            "remaining_days": remaining_days,
-            "net_total": money::normalize(subscription.net_total),
-            "discount": money::normalize(subscription.discount),
-            "status": subscription.status,
-            "start_date": subscription.start_date.format("%Y-%m-%d").to_string(),
-            "expected_end_date": subscription.expected_end_date.map(|date| date.format("%Y-%m-%d").to_string()),
-            "end_date": subscription.end_date.map(|date| date.format("%Y-%m-%d").to_string()),
-        }));
+        let remaining = subscription
+            .sessions_count
+            .saturating_sub(subscription.sessions_used);
+        total_sessions += u64::from(subscription.sessions_count);
+        used_sessions += u64::from(subscription.sessions_used);
+        remaining_sessions += u64::from(remaining);
+        total_value += subscription.total_price;
+        let (received, refunded) = subscription_financials(state, subscription.id).await?;
+        let outstanding = if subscription.status == "cancelled" {
+            Decimal::ZERO
+        } else {
+            (subscription.total_price - received).max(Decimal::ZERO)
+        };
+        received_amount += received;
+        refunded_amount += refunded;
+        outstanding_amount += outstanding;
+        let supervised_sessions =
+            subscription_supervised_sessions(state, subscription.id, filters).await?;
+        completed_sessions += supervised_sessions
+            .iter()
+            .filter(|session| session.get("status").and_then(Value::as_str) == Some("closed"))
+            .count() as u64;
+        let mut value = loaders::subscription_from_row(&state.pool, subscription).await?;
+        value
+            .as_object_mut()
+            .expect("subscription resource must be an object")
+            .insert(
+                "supervised_sessions".into(),
+                Value::Array(supervised_sessions),
+            );
+        values.push(value);
     }
     Ok(json!({
         "rows": values,
         "totals": {
             "count": rows.len(),
             "active": active,
+            "completed": completed,
+            "cancelled": cancelled,
+            "total_sessions": total_sessions,
+            "used_sessions": used_sessions,
+            "completed_sessions": completed_sessions,
             "remaining_sessions": remaining_sessions,
-            "net_total": money::normalize(net_total),
+            "total_value": money::normalize(total_value),
+            "received_amount": money::normalize(received_amount),
+            "refunded_amount": money::normalize(refunded_amount),
+            "outstanding_amount": money::normalize(outstanding_amount),
+            "retained_amount": money::normalize(received_amount - refunded_amount),
         },
     }))
+}
+
+async fn subscription_supervised_sessions(
+    state: &AppState,
+    subscription_id: u64,
+    filters: &ReportFilters,
+) -> ApiResult<Vec<Value>> {
+    let sessions = sqlx::query_as::<_, SessionRow>(
+        "SELECT * FROM sessions \
+         WHERE subscription_id = ? AND type = 'subscription' AND status IN ('closed','cancelled') \
+           AND (? IS NULL OR DATE(opened_at) >= ?) \
+           AND (? IS NULL OR DATE(opened_at) <= ?) \
+           AND (? IS NULL OR doctor_id = ?) \
+         ORDER BY closed_at, id",
+    )
+    .bind(subscription_id)
+    .bind(filters.from)
+    .bind(filters.from)
+    .bind(filters.to)
+    .bind(filters.to)
+    .bind(filters.doctor_id)
+    .bind(filters.doctor_id)
+    .fetch_all(&state.pool)
+    .await?;
+    let mut values = Vec::with_capacity(sessions.len());
+    for session in sessions {
+        let supervising_doctor = doctor(state, session.doctor_id).await?;
+        values.push(json!({
+            "id": session.id,
+            "code": session.code,
+            "opened_at": time::iso(session.opened_at),
+            "closed_at": session.closed_at.map(time::iso),
+            "status": session.status,
+            "doctor": {
+                "id": supervising_doctor.id,
+                "name": supervising_doctor.name,
+            },
+        }));
+    }
+    Ok(values)
+}
+
+async fn subscription_financials(
+    state: &AppState,
+    subscription_id: u64,
+) -> ApiResult<(Decimal, Decimal)> {
+    let received = sqlx::query_scalar::<_, Decimal>(
+        "SELECT COALESCE(SUM(source.amount), 0) FROM (\
+            SELECT p.amount AS amount FROM payments p \
+            WHERE p.subscription_id = ? AND p.type = 'subscription_payment' AND p.amount > 0 \
+            UNION ALL \
+            SELECT pa.amount AS amount FROM payment_allocations pa \
+            INNER JOIN payments p ON p.id = pa.payment_id AND p.type = 'debt_payment' \
+            INNER JOIN debts d ON d.id = pa.debt_id \
+            WHERE d.subscription_id = ?\
+        ) source",
+    )
+    .bind(subscription_id)
+    .bind(subscription_id)
+    .fetch_one(&state.pool)
+    .await?;
+    let refunded = sqlx::query_scalar::<_, Decimal>(
+        "SELECT COALESCE(SUM(ABS(amount)), 0) FROM payments \
+         WHERE subscription_id = ? AND type = 'refund' AND amount < 0",
+    )
+    .bind(subscription_id)
+    .fetch_one(&state.pool)
+    .await?;
+    Ok((received, refunded))
 }
 
 async fn patient(state: &AppState, id: u64) -> ApiResult<PatientRow> {
@@ -456,18 +595,6 @@ async fn sponsor(state: &AppState, id: u64) -> ApiResult<SponsorRow> {
 async fn session_services(state: &AppState, id: u64) -> ApiResult<Vec<SessionServiceRow>> {
     Ok(sqlx::query_as::<_, SessionServiceRow>(
         "SELECT * FROM session_services WHERE session_id = ? ORDER BY id",
-    )
-    .bind(id)
-    .fetch_all(&state.pool)
-    .await?)
-}
-
-async fn subscription_services(
-    state: &AppState,
-    id: u64,
-) -> ApiResult<Vec<SubscriptionServiceRow>> {
-    Ok(sqlx::query_as::<_, SubscriptionServiceRow>(
-        "SELECT * FROM subscription_services WHERE subscription_id = ? ORDER BY id",
     )
     .bind(id)
     .fetch_all(&state.pool)

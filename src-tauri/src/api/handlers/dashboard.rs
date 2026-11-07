@@ -1,7 +1,6 @@
 use crate::api::{
     auth::AuthUser,
     error::ApiResult,
-    handlers::subscriptions,
     loaders, money, resources,
     rows::{PaymentRow, SessionRow, SubscriptionRow},
     time, AppState,
@@ -10,7 +9,7 @@ use axum::{
     extract::{Query, State},
     Json,
 };
-use chrono::{Duration, NaiveDate};
+use chrono::NaiveDate;
 use rust_decimal::Decimal;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -25,7 +24,6 @@ pub async fn show(
     auth: AuthUser,
     Query(query): Query<DashboardQuery>,
 ) -> ApiResult<Json<Value>> {
-    subscriptions::expire_monthly(&state).await?;
     let date = query.date.unwrap_or_else(time::today);
     let sessions_count = sqlx::query_scalar::<_, u64>(
         "SELECT CAST(COUNT(*) AS UNSIGNED) FROM sessions WHERE DATE(opened_at) = ?",
@@ -50,17 +48,11 @@ pub async fn show(
     )
     .fetch_all(&state.pool)
     .await?;
-    let near_date = time::today() + Duration::days(state.config.near_end_days);
     let near_subscriptions = sqlx::query_as::<_, SubscriptionRow>(
         "SELECT * FROM subscriptions \
-         WHERE status = 'active' AND ( \
-             (plan_type = 'legacy_package' AND ((sessions_count - sessions_used) <= ? OR expected_end_date <= ?)) \
-             OR (plan_type = 'monthly' AND end_date <= ?) \
-         ) ORDER BY id DESC",
+         WHERE status = 'active' AND (sessions_count - sessions_used) <= ? ORDER BY id DESC",
     )
-    .bind(state.config.near_end_sessions)
-    .bind(near_date)
-    .bind(near_date)
+    .bind(state.config.subscription_follow_up_sessions)
     .fetch_all(&state.pool)
     .await?;
 
@@ -88,10 +80,10 @@ pub async fn show(
     if auth.user.role != "admin" {
         stats.push(json!({
             "key": "near_subscriptions",
-            "label": "الاشتراكات القريبة من الانتهاء",
+            "label": "الاشتراكات القريبة من الاكتمال",
             "value": near_subscriptions.len(),
             "money": false,
-            "to": "/subscriptions?near_end=1",
+            "to": "/subscriptions",
         }));
         return Ok(Json(json!({
             "data": {
@@ -105,7 +97,7 @@ pub async fn show(
 
     let service_value = scalar_decimal(
         &state,
-        "SELECT SUM(net_total) FROM sessions WHERE DATE(opened_at) = ? AND status = 'closed'",
+        "SELECT SUM(net_total) FROM sessions WHERE DATE(opened_at) = ? AND status = 'closed' AND type = 'individual'",
         Some(date),
     )
     .await?;
@@ -123,7 +115,7 @@ pub async fn show(
     .await?;
     let doctor_earned = scalar_decimal(
         &state,
-        "SELECT SUM(commission_amount) FROM sessions WHERE status = 'closed'",
+        "SELECT SUM(commission_amount) FROM sessions WHERE type = 'individual' AND status = 'closed' AND commission_amount IS NOT NULL",
         None,
     )
     .await?;
@@ -134,7 +126,7 @@ pub async fn show(
         json!({ "key": "service_value_today", "label": "قيمة جلسات اليوم", "value": money::normalize(service_value), "money": true, "to": format!("/reports/sessions?from={date_text}&to={date_text}") }),
         json!({ "key": "collections_today", "label": "المقبوضات اليوم", "value": money::normalize(collections), "money": true, "to": format!("/reports/collections?from={date_text}&to={date_text}") }),
         json!({ "key": "debts_remaining", "label": "إجمالي الديون", "value": money::normalize(debts_remaining), "money": true, "to": "/reports/debts" }),
-        json!({ "key": "near_subscriptions", "label": "الاشتراكات القريبة", "value": near_subscriptions.len(), "money": false, "to": "/subscriptions?near_end=1" }),
+        json!({ "key": "near_subscriptions", "label": "الاشتراكات القريبة من الاكتمال", "value": near_subscriptions.len(), "money": false, "to": "/subscriptions" }),
         json!({ "key": "doctor_dues_remaining", "label": "مستحقات الأطباء غير المصروفة", "value": money::normalize(doctor_remaining), "money": true, "to": "/reports/doctor-dues" }),
     ]);
 

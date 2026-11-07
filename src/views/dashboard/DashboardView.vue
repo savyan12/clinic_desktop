@@ -61,17 +61,17 @@
 
       <section class="follow-up-section">
         <div class="section-row">
-          <div><h2 class="section-heading">تحتاج متابعة قريباً</h2><span class="caption-text">اشتراكات متبقي منها جلستان أو أقل أو يقترب تاريخها المتوقع</span></div>
-          <router-link to="/subscriptions?near_end=1">عرض الاشتراكات</router-link>
+          <div><h2 class="section-heading">تحتاج متابعة قريباً</h2><span class="caption-text">اشتراكات متبقي منها جلستان أو أقل</span></div>
+          <router-link to="/subscriptions">عرض الاشتراكات</router-link>
         </div>
         <div v-if="dashboard.near_subscriptions.length" class="follow-up-strip">
           <router-link v-for="subscription in dashboard.near_subscriptions" :key="subscription.id" :to="`/subscriptions/${subscription.id}`">
             <strong>{{ subscription.patient.name }}</strong>
-            <span>{{ subscription.plan_type === 'monthly' ? 'اشتراك شهري' : subscription.services.map((item) => item.name).join(' + ') }}</span>
-            <em>{{ subscription.plan_type === 'monthly' ? `ينتهي ${formatSubscriptionDate(subscription.end_date)}` : `متبقي ${subscription.remaining}` }}</em>
+            <span>{{ subscription.name }} — {{ subscription.services.map((item) => item.name).join(' + ') }}</span>
+            <em>متبقي {{ subscription.remaining }}</em>
           </router-link>
         </div>
-        <EmptyState v-else icon="mdi-check-decagram-outline" title="لا توجد اشتراكات قريبة من الانتهاء" description="لا توجد اشتراكات تحتاج متابعة وفق الحد الحالي." />
+        <EmptyState v-else icon="mdi-check-decagram-outline" title="لا توجد اشتراكات قريبة من الاكتمال" description="لا توجد اشتراكات تحتاج متابعة وفق الحد الحالي." />
       </section>
 
       <section v-if="auth.isAdmin" class="admin-summary-grid">
@@ -168,7 +168,6 @@ async function loadDoctors() {
 
 const time = (value) => new Intl.DateTimeFormat('ar-LY-u-nu-latn', { hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(value))
 const paymentLabel = (type) => ({ wallet_topup: 'شحن رصيد', session_payment: 'دفعة جلسة', subscription_payment: 'دفعة اشتراك', debt_payment: 'تسديد دين', refund: 'استرجاع' }[type] || type)
-const formatSubscriptionDate = (value) => new Intl.DateTimeFormat('ar-LY-u-nu-latn', { dateStyle: 'medium' }).format(new Date(`${value}T00:00:00`))
 </script>
 
 <style scoped>
