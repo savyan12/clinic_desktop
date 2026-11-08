@@ -5,11 +5,11 @@
       subtitle="تسجيل المصروفات المدفوعة فعليًا مع حفظ التصحيحات والإلغاءات"
     >
       <template #actions>
-        <v-btn to="/reports/expenses" variant="outlined" prepend-icon="mdi-chart-box-outline">
-          عرض التقرير
-        </v-btn>
         <v-btn color="primary" prepend-icon="mdi-plus" @click="openCreate">
           إضافة مصروف
+        </v-btn>
+        <v-btn to="/reports/expenses" variant="outlined" prepend-icon="mdi-chart-box-outline">
+          عرض التقرير
         </v-btn>
       </template>
     </PageHeader>
@@ -580,7 +580,7 @@ function formatDateTime(value) {
 .expense-summary > div:first-child { border-inline-start: 0; }
 .expense-summary span { color: var(--color-ink-muted); font-size: 13px; }
 .expense-summary :deep(.money-text) { font-size: 25px; font-weight: 600; }
-.expense-summary .summary-total { background: var(--color-info-bg); }
+.expense-summary .summary-total { background: var(--color-primary-subtle); }
 .expense-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 16px; align-items: end; }
 .cell-caption { display: block; margin-top: 4px; color: var(--color-ink-muted); font-size: 12px; }
 .expense-description-cell { max-width: 260px; }
@@ -590,7 +590,7 @@ function formatDateTime(value) {
 .expense-details-heading { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .expense-details-heading h2 { margin: 0; font-size: 21px; }
 .expense-details-heading span { color: var(--color-ink-muted); font-size: 12px; }
-.expense-details-icon { width: 44px; height: 44px; display: grid; flex: 0 0 auto; place-items: center; border-radius: 12px; background: var(--color-info-bg); color: var(--color-primary); }
+.expense-details-icon { width: 44px; height: 44px; display: grid; flex: 0 0 auto; place-items: center; border-radius: var(--radius-md); background: var(--color-primary-subtle); border: 1px solid var(--color-primary-border); color: var(--color-primary); }
 .expense-details-icon :deep(.v-icon) { font-size: 24px; }
 .expense-details-content { display: grid; gap: 18px; padding: 22px 24px 8px !important; }
 .expense-details-summary { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(180px, .8fr); overflow: hidden; border: 1px solid var(--color-hairline); border-radius: var(--radius-field); background: var(--color-canvas); }
@@ -598,12 +598,12 @@ function formatDateTime(value) {
 .expense-details-summary > div + div { border-inline-start: 1px solid var(--color-hairline); }
 .expense-details-summary span, .expense-details-grid span, .rent-details-grid span, .expense-details-note > span { display: block; margin-bottom: 5px; color: var(--color-ink-muted); font-size: 12px; }
 .expense-details-summary strong { display: block; overflow-wrap: anywhere; font-size: 16px; }
-.expense-details-amount { background: var(--color-info-bg); }
+.expense-details-amount { background: var(--color-primary-subtle); }
 .expense-details-amount :deep(.money-text) { color: var(--color-primary); font-size: 23px; font-weight: 700; }
 .expense-details-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .expense-details-grid > div, .rent-details-grid > div { min-width: 0; padding: 13px 14px; border: 1px solid var(--color-hairline); border-radius: var(--radius-field); background: var(--color-pearl); }
 .expense-details-grid strong, .rent-details-grid strong { display: block; overflow-wrap: anywhere; font-size: 14px; }
-.rent-details-panel { display: grid; gap: 12px; padding: 16px; border: 1px solid color-mix(in srgb, var(--color-primary) 25%, var(--color-hairline)); border-radius: var(--radius-field); background: var(--color-info-bg); }
+.rent-details-panel { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--color-primary-border); border-radius: var(--radius-field); background: var(--color-primary-subtle); }
 .rent-details-panel h3 { display: flex; align-items: center; gap: 7px; margin: 0; color: var(--color-primary); font-size: 15px; }
 .rent-details-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .rent-details-grid > div { background: var(--color-canvas); }
@@ -613,8 +613,8 @@ function formatDateTime(value) {
 .expense-cancellation-details > div { display: flex; align-items: center; gap: 7px; color: var(--color-danger); }
 .expense-cancellation-details p { margin: 0; overflow-wrap: anywhere; }
 .expense-cancellation-details > span { color: var(--color-ink-muted); font-size: 12px; }
-.expense-details-meta { margin: 0; color: var(--color-ink-muted); font-size: 11px; }
-.dialog-title { padding: 24px 24px 4px; font-size: 22px; font-weight: 600; }
+.expense-details-meta { margin: 0; color: var(--color-ink-muted); font-size: 13px; }
+.dialog-title { padding: 24px 24px 4px; font-size: var(--font-section-size); font-weight: 600; }
 .dialog-content { display: grid; gap: 16px; padding: 16px 24px !important; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .dialog-actions { gap: 8px; justify-content: flex-end; padding: 12px 24px 24px; }

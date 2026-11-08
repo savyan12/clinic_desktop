@@ -168,7 +168,7 @@ function getDashboard(config) {
       stats: [
         { key: 'sessions_today', label: 'جلسات اليوم', value: todaySessions.length, caption: `${openSessions.length} مفتوحة`, to: `/reports/sessions?from=${today}&to=${today}` },
         { key: 'patients_today', label: 'المرضى الحاضرون', value: patientsToday, caption: 'مرضى فريدون', to: `/reports/sessions?from=${today}&to=${today}` },
-        { key: 'service_value', label: 'قيمة جلسات اليوم', value: money(sum(closedToday.filter((item) => item.type === 'individual').map((item) => item.net_total))), money: true, caption: 'قيمة خدمات مغلقة', to: `/reports/sessions?from=${today}&to=${today}` },
+        { key: 'service_value_today', label: 'قيمة جلسات اليوم', value: money(sum(closedToday.filter((item) => item.type === 'individual').map((item) => item.net_total))), money: true, caption: 'قيمة خدمات مغلقة', to: `/reports/sessions?from=${today}&to=${today}` },
         { key: 'collections_today', label: 'المقبوضات اليوم', value: money(collectedToday), money: true, caption: 'بعد الاسترجاعات', to: `/reports/collections?from=${today}&to=${today}` },
         { key: 'debts', label: 'إجمالي الديون', value: money(sum(db.debts.filter((item) => item.status !== 'void').map((item) => item.remaining))), money: true, caption: 'مبالغ لم تُحصّل', to: '/reports/debts?status=open' },
         { key: 'near_subscriptions', label: 'اشتراكات قريبة من الاكتمال', value: nearSubscriptions.length, caption: 'متبقي جلستان أو أقل', to: '/subscriptions' },

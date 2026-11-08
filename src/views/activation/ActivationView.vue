@@ -39,7 +39,7 @@
           mandatory
           color="primary"
           variant="outlined"
-          class="mode-toggle"
+          class="segmented-control mode-toggle"
         >
           <v-btn value="new" prepend-icon="mdi-star-outline">تفعيل جديد</v-btn>
           <v-btn value="restore" prepend-icon="mdi-backup-restore">استكمال من نسخة احتياطية</v-btn>
@@ -281,20 +281,21 @@ function formatBytes(value) {
 
 <style scoped>
 .activation-page {
-  min-height: 100vh;
+  min-height: 100dvh;
   display: grid;
   place-items: center;
   padding: 32px;
-  background: var(--color-pearl);
+  background: var(--color-background);
 }
 .activation-shell {
   width: min(940px, 100%);
   display: grid;
   gap: 24px;
   padding: 32px;
-  border: 1px solid var(--color-hairline);
-  border-radius: var(--radius-card);
-  background: var(--color-canvas);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-dialog);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-raised);
 }
 .activation-brand {
   display: flex;
@@ -310,7 +311,7 @@ function formatBytes(value) {
   margin: 0;
 }
 .activation-brand h1 {
-  font-size: 30px;
+  font-size: var(--font-heading-size);
 }
 .activation-brand p,
 .section-copy p {

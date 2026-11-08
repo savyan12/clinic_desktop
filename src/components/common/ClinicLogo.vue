@@ -33,7 +33,7 @@ const numericSize = computed(() => (typeof props.size === 'number' ? props.size 
   display: block;
   flex: 0 0 auto;
   object-fit: contain;
-  background: var(--color-canvas);
+  background: transparent;
   image-rendering: auto;
   user-select: none;
 }

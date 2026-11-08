@@ -16,6 +16,7 @@
     "verify:real-api": "node scripts/verify-real-api.mjs",
     "seed:realistic": "node scripts/seed-realistic-data.mjs",
     "verify:browser": "node scripts/verify-browser.mjs",
+    "verify:startup-routing": "node scripts/verify-startup-routing.mjs",
     "verify:form-flow": "node scripts/verify-form-flow.mjs",
     "verify:ui": "node scripts/verify-ui.mjs"
   },

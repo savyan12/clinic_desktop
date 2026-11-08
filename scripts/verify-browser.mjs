@@ -66,6 +66,17 @@ async function navigate(path, expectedText, expectedPath = path) {
 }
 
 async function login(username, password) {
+  if (process.env.MOCK_AUTH === 'true') {
+    const role = username === 'admin' ? 'admin' : 'receptionist'
+    const token = role === 'admin' ? 'mock-admin-token' : 'mock-reception-token'
+    const user = { id: role === 'admin' ? 1 : 2, name: role === 'admin' ? 'مدير النظام' : 'موظف الاستقبال', username, role, is_active: true }
+    await send('Runtime.evaluate', {
+      expression: `localStorage.setItem('clinic-auth', ${JSON.stringify(JSON.stringify({ token, user }))})`,
+      returnByValue: true,
+    })
+    process.stdout.write(`PASS login ${username} (${role})\n`)
+    return
+  }
   const result = await send('Runtime.evaluate', {
     expression: `(async () => {
       const response = await fetch('/api/v1/auth/login', {
@@ -93,28 +104,28 @@ issues.length = 0
 await login('admin', adminPassword)
 
 const adminRoutes = [
-  ['/', 'فتح جلسة جديدة'],
-  ['/sessions', 'الجلسات المفتوحة والمغلقة والملغاة'],
-  ['/sessions/1', 'التسوية المالية'],
-  ['/patients', 'البحث في السجلات'],
+  ['/', 'تسجيل جلسة'],
+  ['/sessions', 'تسجيل جلسة جديدة'],
+  ['/sessions/1', 'الجلسة'],
+  ['/patients', 'سجل المرضى'],
   ['/patients/1', 'الحساب المالي'],
-  ['/subscriptions', 'متابعة الجلسات المتبقية'],
-  ['/subscriptions/1', 'سجل الاستخدام'],
-  ['/doctors', 'المستحق المكتسب منفصل'],
+  ['/subscriptions', 'إضافة اشتراك'],
+  ['/subscriptions/1', 'سجل جلسات الاشتراك'],
+  ['/doctors', 'إجمالي المكتسب'],
   ['/doctors/1', 'الجلسات المحتسبة'],
-  ['/services', 'الأسعار الحالية'],
-  ['/sponsors', 'المؤسسات المسؤولة'],
-  ['/sponsors/1', 'كشف الجلسات والخدمات'],
-  ['/users', 'إدارة حسابات موظفي الاستقبال'],
-  ['/expenses', 'تسجيل المصروفات المدفوعة فعليًا'],
+  ['/services', 'الخدمات'],
+  ['/sponsors', 'الجهات الراعية'],
+  ['/sponsors/1', 'طباعة كشف الحساب'],
+  ['/users', 'إضافة مستخدم'],
+  ['/expenses', 'المشتريات والإيجار'],
   ['/reports/sessions', 'تقرير الجلسات'],
   ['/reports/collections', 'تقرير المقبوضات'],
   ['/reports/debts', 'تقرير الديون'],
   ['/reports/doctor-dues', 'تقرير مستحقات الأطباء'],
   ['/reports/subscriptions', 'تقرير الاشتراكات'],
   ['/reports/expenses', 'تقرير المشتريات والإيجار'],
-  ['/audit-log', 'سجل للقراءة فقط'],
-  ['/settings', 'وضوح النص وأحجام الخطوط'],
+  ['/audit-log', 'سجل التدقيق'],
+  ['/settings', 'إعدادات النظام'],
   ['/print/session/1', 'إيصال جلسة'],
   ['/print/statement/patient/1', 'كشف حساب مريض'],
   ['/print/statement/sponsor/1', 'كشف حساب جهة راعية'],
@@ -123,16 +134,16 @@ const adminRoutes = [
 
 for (const [path, text] of adminRoutes) await navigate(path, text)
 
-await navigate('/', 'فتح جلسة جديدة')
+await navigate('/', 'تسجيل جلسة')
 const screenshot = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true })
 await writeFile('/tmp/clinic-dashboard.png', Buffer.from(screenshot.data, 'base64'))
 
 await login('reception', receptionistPassword)
-await navigate('/', 'تحتاج متابعة قريباً')
-await navigate('/patients', 'البحث في السجلات')
-await navigate('/sessions', 'الجلسات المفتوحة والمغلقة والملغاة')
-await navigate('/subscriptions', 'متابعة الجلسات المتبقية')
-await navigate('/settings', 'فتح جلسة جديدة', '/')
+await navigate('/', 'تحتاج متابعة')
+await navigate('/patients', 'سجل المرضى')
+await navigate('/sessions', 'تسجيل جلسة جديدة')
+await navigate('/subscriptions', 'إضافة اشتراك')
+await navigate('/settings', 'تسجيل جلسة', '/')
 
 socket.close()
 

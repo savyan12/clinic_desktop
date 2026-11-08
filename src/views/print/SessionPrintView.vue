@@ -52,7 +52,7 @@
             <tr v-for="service in session.services" :key="service.id">
               <td class="service-name">{{ service.name }}</td>
               <td class="service-details">{{ serviceDescription(service) }}</td>
-              <td class="service-total"><MoneyText :value="service.price" /></td>
+              <td class="service-total"><MoneyText :value="service.price" classic /></td>
             </tr>
             <tr v-if="!session.services.length">
               <td colspan="3" class="empty-line">لا توجد خدمات مسجلة</td>
@@ -67,15 +67,15 @@
           <dl>
             <div>
               <dt>إجمالي الخدمات</dt>
-              <dd><MoneyText :value="session.services_total" /></dd>
+              <dd><MoneyText :value="session.services_total" classic /></dd>
             </div>
             <div>
               <dt>الخصم</dt>
-              <dd><MoneyText :value="session.discount" /></dd>
+              <dd><MoneyText :value="session.discount" classic /></dd>
             </div>
             <div class="net-amount">
               <dt>الصافي المطلوب</dt>
-              <dd><MoneyText :value="session.net_total" /></dd>
+              <dd><MoneyText :value="session.net_total" classic /></dd>
             </div>
           </dl>
         </div>

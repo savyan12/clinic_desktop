@@ -1,15 +1,19 @@
 <template>
   <v-main class="auth-layout" data-form-flow-page>
-    <div class="auth-brand">
-      <div class="brand-mark" aria-hidden="true">
-        <ClinicLogo :size="84" alt="" />
-      </div>
-      <div>
-        <strong>{{ settings.clinic_name }}</strong>
-        <span>{{ settings.clinic_subtitle }}</span>
-      </div>
+    <div class="auth-shell">
+      <header class="auth-brand">
+        <ClinicLogo :size="64" />
+        <div>
+          <strong>{{ settings.clinic_name }}</strong>
+          <span>{{ settings.clinic_subtitle }}</span>
+        </div>
+      </header>
+      <router-view />
+      <footer class="auth-footer">
+        <v-icon icon="mdi-shield-check-outline" size="18" aria-hidden="true" />
+        <span>منظومة داخلية لإدارة بيانات العيادة</span>
+      </footer>
     </div>
-    <router-view />
   </v-main>
 </template>
 
@@ -37,35 +41,41 @@ onMounted(async () => {
 
 <style scoped>
 .auth-layout {
-  min-height: 100vh;
+  min-height: 100dvh;
   display: grid;
   place-items: center;
-  align-content: center;
-  gap: 32px;
-  padding: 32px 16px;
-  background: var(--color-pearl);
+  padding: var(--space-8) var(--space-4);
+  background: var(--color-background);
+}
+.auth-shell {
+  width: min(100%, 480px);
+  display: grid;
+  gap: var(--space-5);
 }
 .auth-brand {
   display: flex;
   align-items: center;
-  gap: 14px;
+  justify-content: center;
+  gap: var(--space-3);
 }
 .auth-brand strong {
   display: block;
-  font-size: 22px;
+  color: var(--color-foreground);
+  font-size: 20px;
   font-weight: 600;
 }
 .auth-brand span {
-  color: var(--color-ink-muted);
-  font-size: 14px;
+  display: block;
+  margin-top: 2px;
+  color: var(--color-muted-foreground);
+  font-size: 13px;
 }
-.brand-mark {
-  width: 84px;
-  height: 84px;
-  flex: 0 0 84px;
-  border-radius: 20px;
-  overflow: hidden;
-  border: 1px solid var(--color-hairline);
-  background: var(--color-canvas);
+.auth-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  color: var(--color-muted-foreground);
+  font-size: 13px;
 }
 </style>

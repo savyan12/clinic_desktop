@@ -50,10 +50,32 @@ onMounted(async () => {
 
 <style scoped>
 .print-layout {
+  --color-primary: #0066cc;
+  --color-primary-focus: #0071e3;
+  --color-ink: #1d1d1f;
+  --color-ink-muted: #4f4f54;
+  --color-canvas: #ffffff;
+  --color-parchment: #f5f5f7;
+  --color-pearl: #fafafc;
+  --color-hairline: #e0e0e0;
+  --color-info-bg: #e8f1fc;
+  --color-success: #1a7f37;
+  --color-success-bg: #e6f4ea;
+  --color-danger: #c5221f;
+  --color-danger-bg: #fce8e6;
+  --color-warning: #9a5b00;
+  --color-warning-bg: #fef3d7;
+  --color-print-brand: #00784f;
+  --color-print-brand-dark: #00694b;
+  --color-print-tint: #eaf4ef;
+  --color-print-border: #c9d4e2;
+  --color-print-muted: #566277;
   width: min(100%, 900px);
   margin: 0 auto;
   padding: 32px;
+  color: var(--color-ink);
   background: var(--color-canvas);
+  line-height: 1.47;
 }
 .print-layout--custom {
   width: 100%;
@@ -65,6 +87,10 @@ onMounted(async () => {
   display: flex;
   justify-content: space-between;
   margin-bottom: 28px;
+}
+.print-toolbar :deep(.v-btn) {
+  border-radius: var(--radius-pill) !important;
+  font-weight: 400 !important;
 }
 .print-heading {
   display: flex;
@@ -81,6 +107,9 @@ onMounted(async () => {
   border: 1px solid var(--color-hairline);
   border-radius: 14px;
   overflow: hidden;
+}
+.print-layout :deep(.clinic-logo) {
+  background: var(--color-canvas);
 }
 .print-heading h1 {
   margin: 0;

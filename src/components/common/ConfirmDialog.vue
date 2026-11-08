@@ -1,7 +1,10 @@
 <template>
-  <v-dialog :model-value="modelValue" persistent max-width="520" @update:model-value="$emit('update:modelValue', $event)">
+  <v-dialog :model-value="modelValue" persistent max-width="440" @update:model-value="$emit('update:modelValue', $event)">
     <v-card>
-      <v-card-title class="dialog-title">{{ title }}</v-card-title>
+      <v-card-title class="dialog-title confirm-title">
+        <span class="confirm-icon" :class="{ danger }"><v-icon :icon="danger ? 'mdi-alert-outline' : 'mdi-help-circle-outline'" size="24" /></span>
+        {{ title }}
+      </v-card-title>
       <v-card-text>
         <p class="dialog-message">{{ message }}</p>
         <v-textarea
@@ -46,7 +49,10 @@ function confirm() {
 </script>
 
 <style scoped>
-.dialog-title { padding: 24px 24px 4px; font-size: 22px; font-weight: 600; }
-.dialog-message { margin: 0 0 20px; color: var(--color-ink-muted); line-height: 1.7; }
-.dialog-actions { gap: 8px; justify-content: flex-end; padding: 8px 24px 24px; }
+.dialog-title { padding: 24px 24px 8px; font-size: 20px; font-weight: 600; }
+.confirm-title { display: flex; align-items: center; gap: 12px; white-space: normal; }
+.confirm-icon { width: 40px; height: 40px; display: grid; flex: 0 0 40px; place-items: center; color: var(--color-primary); background: var(--color-primary-subtle); border-radius: var(--radius-md); }
+.confirm-icon.danger { color: var(--color-danger); background: var(--color-danger-bg); }
+.dialog-message { margin: 0 0 20px; color: var(--color-muted-foreground); line-height: 1.7; }
+.dialog-actions { gap: 8px; justify-content: flex-end; padding: 12px 24px 20px; }
 </style>

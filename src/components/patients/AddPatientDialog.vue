@@ -11,13 +11,13 @@
           <div><strong>احتمال وجود سجل مكرر</strong><span>يوجد مريض برقم الهاتف نفسه. تحقق من البحث، أو أكد أن هذا مريض مختلف.</span></div>
         </div>
         <div class="form-grid">
-          <v-text-field v-model="form.name" label="الاسم الكامل" :error-messages="errors.name" />
-          <v-text-field v-model="form.phone" label="رقم الهاتف" inputmode="tel" dir="ltr" :error-messages="errors.phone" />
-          <v-text-field v-model.number="form.age" label="العمر (اختياري)" type="number" min="0" clearable :error-messages="errors.age" />
-          <v-select v-model="form.gender" label="الجنس (اختياري)" :items="genderItems" clearable :error-messages="errors.gender" />
-          <v-text-field v-model="form.area" label="المنطقة أو عنوان السكن (اختياري)" />
-          <v-text-field v-model="form.emergency_phone" label="هاتف الطوارئ (اختياري)" inputmode="tel" dir="ltr" />
-          <v-select v-model="form.sponsor_id" class="grid-wide" label="الجهة الراعية (اختياري)" :items="sponsors || []" item-title="name" item-value="id" clearable :loading="loadingOptions" :disabled="loadingOptions || Boolean(optionsError)" />
+          <AppField label="الاسم الكامل" required v-slot="{ id }"><v-text-field :id="id" v-model="form.name" aria-label="الاسم الكامل" :error-messages="errors.name" /></AppField>
+          <AppField label="رقم الهاتف" required v-slot="{ id }"><v-text-field :id="id" v-model="form.phone" aria-label="رقم الهاتف" inputmode="tel" dir="ltr" :error-messages="errors.phone" /></AppField>
+          <AppField label="العمر (اختياري)" v-slot="{ id }"><v-text-field :id="id" v-model.number="form.age" aria-label="العمر" type="number" min="0" clearable :error-messages="errors.age" /></AppField>
+          <AppField label="الجنس (اختياري)" v-slot="{ id }"><v-select :id="id" v-model="form.gender" aria-label="الجنس" :items="genderItems" clearable :error-messages="errors.gender" /></AppField>
+          <AppField label="المنطقة أو عنوان السكن (اختياري)" v-slot="{ id }"><v-text-field :id="id" v-model="form.area" aria-label="المنطقة أو عنوان السكن" /></AppField>
+          <AppField label="هاتف الطوارئ (اختياري)" v-slot="{ id }"><v-text-field :id="id" v-model="form.emergency_phone" aria-label="هاتف الطوارئ" inputmode="tel" dir="ltr" /></AppField>
+          <AppField class="grid-wide" label="الجهة الراعية (اختياري)" v-slot="{ id }"><v-select :id="id" v-model="form.sponsor_id" aria-label="الجهة الراعية" :items="sponsors || []" item-title="name" item-value="id" clearable :loading="loadingOptions" :disabled="loadingOptions || Boolean(optionsError)" /></AppField>
         </div>
       </v-card-text>
       <v-card-actions class="dialog-actions">
@@ -33,6 +33,7 @@ import { reactive, ref, watch } from 'vue'
 import { createPatient } from '@/api/patients'
 import { getSponsorOptions } from '@/api/sponsors'
 import { useDialogOptions } from '@/composables/useDialogOptions'
+import AppField from '@/components/common/AppField.vue'
 import InlineError from '@/components/common/InlineError.vue'
 import { useUiStore } from '@/stores/ui'
 

@@ -59,6 +59,7 @@ for (const name of ['mysqld', 'mysql', 'mysqldump', 'mysqladmin']) {
 }
 
 const config = JSON.parse(await readFile(resolve(projectRoot, 'src-tauri/tauri.conf.json'), 'utf8'))
+const windowsConfig = JSON.parse(await readFile(resolve(projectRoot, 'src-tauri/tauri.windows.conf.json'), 'utf8'))
 const resources = config.bundle.resources
 const expectedResources = {
   'resources/runtime/mysql': 'runtime/mysql',
@@ -70,6 +71,11 @@ if (JSON.stringify(config.bundle.targets) !== '["nsis"]'
   || config.bundle.windows.webviewInstallMode.type !== 'offlineInstaller'
   || config.bundle.windows.nsis.installerHooks !== 'windows/installer-hooks.nsh') {
   throw new Error('Release must bundle only the Rust application, MySQL, VC++, and offline WebView2 through NSIS.')
+}
+if (typeof windowsConfig.productName !== 'string'
+  || !windowsConfig.productName
+  || !/^[\x20-\x7E]+$/.test(windowsConfig.productName)) {
+  throw new Error('The Windows product name must be non-empty ASCII so the default MySQL installation path is supported.')
 }
 for (const path of [...config.bundle.icon, config.bundle.windows.nsis.installerHooks]) {
   await requireFile(resolve(projectRoot, 'src-tauri', path))

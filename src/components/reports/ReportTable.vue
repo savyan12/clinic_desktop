@@ -15,11 +15,12 @@
         </tr>
         <tr v-for="(row, rowIndex) in rows" v-else :key="row.id ?? rowIndex">
           <td v-for="column in definition.columns" :key="column.key">
-            <MoneyText v-if="column.kind === 'money'" :value="reportCellRawValue(column, row)" />
+            <MoneyText v-if="column.kind === 'money'" :value="reportCellRawValue(column, row)" :classic="print" />
             <StatusChip
               v-else-if="column.kind === 'status'"
               :type="column.statusType"
               :value="reportCellRawValue(column, row)"
+              :classic="print"
             />
             <bdi v-else :dir="cellDirection(column)">{{ reportCellLabel(column, row) }}</bdi>
           </td>
@@ -49,6 +50,7 @@ const cellDirection = (column) => ['number', 'reference'].includes(column.kind) 
 .report-table-scroll {
   width: 100%;
   overflow-x: auto;
+  scrollbar-gutter: stable;
 }
 
 .report-data-table {
@@ -77,7 +79,7 @@ const cellDirection = (column) => ['number', 'reference'].includes(column.kind) 
 }
 
 .report-data-table td {
-  min-height: 60px;
+  min-height: 54px;
   font-size: var(--font-table-size);
   font-weight: var(--font-table-weight);
 }
