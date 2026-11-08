@@ -10,8 +10,8 @@
     <InlineError v-if="doctorError" :message="doctorError" retry @retry="loadDoctors" />
     <DataTableCard :headers="headers" :items="sessions" :loading="loading" :error="error" :meta="meta" :empty="{ icon: 'mdi-clipboard-search-outline', title: 'لا توجد جلسات مطابقة', description: 'غيّر البحث أو الفلاتر، أو افتح جلسة جديدة.' }" @retry="load" @page="changePage" @empty-action="sessionDialog = true">
       <template #rows="{ items }">
-        <tr v-for="session in items" :key="session.id" class="clickable-row" @click="router.push(`/sessions/${session.id}`)">
-          <td><strong class="ltr-value">{{ session.code }}</strong></td>
+        <tr v-for="session in items" :key="session.id">
+          <td><router-link class="record-link ltr-value" :to="`/sessions/${session.id}`">{{ session.code }}</router-link></td>
           <td><strong>{{ session.patient.name }}</strong><span class="cell-subtitle phone-value">{{ session.patient.phone }}</span></td>
           <td>{{ formatDate(session.opened_at) }}</td>
           <td>{{ session.doctor.name }}</td>
@@ -29,7 +29,6 @@
 
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
 import { getDoctorOptions } from '@/api/doctors'
 import { listSessions } from '@/api/sessions'
 import DataTableCard from '@/components/common/DataTableCard.vue'
@@ -41,7 +40,6 @@ import NewSessionDialog from '@/components/sessions/NewSessionDialog.vue'
 import { useDebounce } from '@/composables/useDebounce'
 import { useAuthStore } from '@/stores/auth'
 
-const router = useRouter()
 const auth = useAuthStore()
 const debounce = useDebounce()
 const sessions = ref([])

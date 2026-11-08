@@ -8,6 +8,8 @@ export default [
       'dist/**',
       'node_modules/**',
       'src-tauri/**',
+      '.agents/**',
+      '.codex/**',
     ],
   },
   js.configs.recommended,

@@ -12,9 +12,34 @@ defineEmits(['retry'])
 </script>
 
 <style scoped>
-.inline-error { display: flex; align-items: flex-start; gap: 10px; padding: 14px 16px; color: var(--color-danger); border: 1px solid var(--color-danger-border); border-radius: var(--radius-field); background: var(--color-danger-bg); }
-.inline-error div { flex: 1; }
-.inline-error strong, .inline-error span { display: block; }
-.inline-error strong { font-weight: 600; }
-.inline-error span { margin-top: 2px; font-size: 14px; }
+.inline-error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  color: var(--color-danger);
+  background: var(--color-danger-bg);
+  border: 1px solid var(--color-danger-border);
+  border-radius: var(--radius-md);
+}
+
+.inline-error div {
+  min-width: 0;
+  flex: 1;
+}
+
+.inline-error strong,
+.inline-error span {
+  display: block;
+}
+
+.inline-error strong {
+  font-weight: 600;
+}
+
+.inline-error span {
+  margin-top: 2px;
+  font-size: 14px;
+  line-height: 1.55;
+}
 </style>

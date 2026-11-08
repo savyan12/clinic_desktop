@@ -52,8 +52,8 @@ async function normalizeError(error) {
   return new ApiError(message, status, errors)
 }
 
-async function handleError(error) {
-  if (error.status === 401) await errorHandlers.unauthorized?.(error)
+async function handleError(error, config = {}) {
+  if (error.status === 401 && !config.skipUnauthorizedHandler) await errorHandlers.unauthorized?.(error)
   if (error.status === 403) await errorHandlers.forbidden?.(error)
 }
 
@@ -96,7 +96,7 @@ export async function request(config) {
     return response.data
   } catch (error) {
     const normalized = await normalizeError(error)
-    await handleError(normalized)
+    await handleError(normalized, config)
     throw normalized
   }
 }
@@ -111,7 +111,7 @@ export async function downloadRequest(config, fallbackFilename = 'download') {
     }
   } catch (error) {
     const normalized = await normalizeError(error)
-    await handleError(normalized)
+    await handleError(normalized, config)
     throw normalized
   }
 }

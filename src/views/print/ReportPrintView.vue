@@ -42,7 +42,7 @@
           </div>
           <div>
             <span>إجمالي قيمة الاشتراكات</span>
-            <MoneyText :value="report.totals.total_value ?? 0" />
+            <MoneyText :value="report.totals.total_value ?? 0" classic />
           </div>
         </section>
 
@@ -77,7 +77,7 @@
                   <td>{{ row.name || '—' }}</td>
                   <td class="numeric-cell">{{ row.sessions_count ?? 0 }}</td>
                   <td class="numeric-cell">{{ row.remaining ?? 0 }}</td>
-                  <td><MoneyText :value="row.total_price" /></td>
+                  <td><MoneyText :value="row.total_price" classic /></td>
                   <td>{{ subscriptionStatus(row.status) }}</td>
                 </tr>
               </tbody>
@@ -87,7 +87,7 @@
                   <th>{{ report.totals.count ?? report.rows.length }} اشتراكات</th>
                   <th class="numeric-cell">{{ report.totals.total_sessions ?? 0 }}</th>
                   <th class="numeric-cell">{{ report.totals.remaining_sessions ?? 0 }}</th>
-                  <th><MoneyText :value="report.totals.total_value ?? 0" /></th>
+                  <th><MoneyText :value="report.totals.total_value ?? 0" classic /></th>
                   <th></th>
                 </tr>
               </tfoot>
@@ -172,7 +172,7 @@
         <section class="report-summary" aria-label="ملخص التقرير">
           <div v-for="item in summaryItems" :key="item.key">
             <span>{{ item.label }}</span>
-            <MoneyText v-if="item.money" :value="item.value" />
+            <MoneyText v-if="item.money" :value="item.value" classic />
             <strong v-else class="ltr-value">{{ item.value }}</strong>
           </div>
         </section>

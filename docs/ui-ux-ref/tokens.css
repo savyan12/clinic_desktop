@@ -1,0 +1,80 @@
+/* docs/ui-ux-ref/tokens.css
+   Single source of truth for UI tokens. Light theme only for now.
+   Colors sampled/derived from the 6 references, contrast checked (WCAG). */
+
+:root {
+  /* ---------- Surfaces ---------- */
+  --canvas: #F3F5F9;          /* page background */
+  --surface: #FFFFFF;        /* cards, sidebar, modals */
+  --surface-subtle: #F6F7FB; /* table header band, subtle blocks */
+  --border: #E6E9F0;         /* card/table dividers */
+  --border-strong: #D5DAE5;  /* inputs */
+
+  /* ---------- Text ---------- */
+  --ink: #14161F;            /* headings, dark emphasis card bg */
+  --text: #344054;           /* body (10.5:1 on white) */
+  --text-muted: #667085;     /* secondary (4.97:1 on white, 4.56:1 on canvas) */
+  --text-faint: #8A91A3;     /* placeholders / disabled ONLY (3.15:1, never for essential text) */
+  --text-on-dark: #FFFFFF;
+  --text-on-dark-muted: #A9B0C0; /* 8.3:1 on --ink */
+
+  /* ---------- Accent (the only interaction color) ---------- */
+  --accent: #1A62E0;         /* white text on it = 5.43:1 */
+  --accent-hover: #1558D6;   /* 6.18:1 */
+  --accent-tint: #EAF1FE;    /* nav active bg, selected rows, focus ring fill */
+  --accent-ring: rgba(26, 98, 224, 0.20);
+
+  /* ---------- Semantic (chips, KPI icons, alerts) ---------- */
+  --success-bg: #E2FAEA;  --success-fg: #0B7A55;  --success-solid: #0E9F6E;
+  --warning-bg: #FFF4D6;  --warning-fg: #9A5B00;  --warning-solid: #F5A524;
+  --danger-bg:  #FDECEA;  --danger-fg:  #B42318;  --danger-solid:  #E5484D;
+  --info-bg:    #EAF1FE;  --info-fg:    #1A62E0;
+  --violet-bg:  #F4ECFF;  --violet-fg:  #6B3FD1;
+
+  /* KPI tint set (used on dashboard stat cards, one tint per metric type) */
+  --kpi-blue:   #E5EFFB;
+  --kpi-violet: #F4ECFF;
+  --kpi-green:  #E2FAEA;
+  --kpi-amber:  #FFF8DE;
+
+  /* ---------- Brand (logo only) ---------- */
+  --brand-logo-green: #0B6B3A; /* use in the logo asset only, never for UI controls */
+
+  /* ---------- Typography ----------
+     Four roles are user-configurable in Settings (font size + weight).
+     The settings page must write to these variables. */
+  --font-sans: "IBM Plex Sans Arabic", "Noto Sans Arabic", system-ui, sans-serif;
+  --fs-body: 16px;     --fw-body: 400;      /* "النص العام" */
+  --fs-table: 15px;    --fw-table: 400;     /* "نص الجداول" */
+  --fs-section: 20px;  --fw-section: 600;   /* "عنوان القسم" */
+  --fs-page: 32px;     --fw-page: 600;      /* "عنوان الصفحة" (default tuned from settings screen: 32 / 600) */
+
+  /* Fixed (not user-configurable) */
+  --fs-caption: 13px;
+  --fs-stat: 30px;     --fw-stat: 700;
+  --lh-body: 1.6;      --lh-tight: 1.25;
+
+  /* ---------- Spacing (4px base) ---------- */
+  --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px;
+  --sp-5: 20px; --sp-6: 24px; --sp-8: 32px; --sp-10: 40px;
+  --page-pad: 32px;        /* content padding */
+  --card-pad: 24px;
+  --grid-gap: 20px;
+  --content-max: 1280px;
+
+  /* ---------- Shape ---------- */
+  --r-card: 18px;
+  --r-control: 12px;       /* inputs, buttons, nav items */
+  --r-chip: 999px;
+  --control-h: 44px;       /* inputs, buttons */
+  --control-h-sm: 36px;    /* filter selects, small buttons */
+
+  /* ---------- Elevation (very soft; no heavy shadows) ---------- */
+  --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04), 0 4px 12px rgba(16, 24, 40, 0.05); /* Nexus-like: visible but soft */
+  --shadow-card-hover: 0 2px 4px rgba(16, 24, 40, 0.05), 0 10px 24px rgba(16, 24, 40, 0.08);
+  --shadow-pop: 0 12px 32px rgba(16, 24, 40, 0.14);   /* modal, dropdown */
+
+  /* ---------- Layout ---------- */
+  --sidebar-w: 264px;
+  --topbar-h: 64px;
+}

@@ -13,7 +13,7 @@ use std::future::Future;
 use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Output, Stdio};
+use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -21,8 +21,22 @@ use tauri::{AppHandle, Manager};
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
 const CONFIG_FORMAT_VERSION: u32 = 1;
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(45);
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+pub(crate) fn hide_console_window(command: &mut Command) {
+    #[cfg(target_os = "windows")]
+    command.creation_flags(CREATE_NO_WINDOW);
+
+    #[cfg(not(target_os = "windows"))]
+    let _ = command;
+}
 
 pub fn initialize(app: &AppHandle, state: &DesktopState) -> Result<(), String> {
     let paths = resolve_paths(app)?;
@@ -597,6 +611,7 @@ pub fn shutdown(state: &DesktopState) {
 
     if let Some(context) = context {
         let mut command = Command::new(&context.executables.mysqladmin);
+        hide_console_window(&mut command);
         command
             .arg(format!(
                 "--defaults-extra-file={}",
@@ -622,11 +637,7 @@ pub fn shutdown(state: &DesktopState) {
 }
 
 pub fn mysql_output(context: &RuntimeContext, args: &[String]) -> Result<Output, String> {
-    let output = Command::new(&context.executables.mysql)
-        .arg(format!(
-            "--defaults-extra-file={}",
-            context.paths.root_client_file.display()
-        ))
+    let output = mysql_command(context)
         .args(args)
         .output()
         .map_err(|error| format!("تعذر الاتصال بقاعدة البيانات المحلية: {error}"))?;
@@ -643,6 +654,7 @@ pub fn mysql_output(context: &RuntimeContext, args: &[String]) -> Result<Output,
 
 pub fn mysql_command(context: &RuntimeContext) -> Command {
     let mut command = Command::new(&context.executables.mysql);
+    hide_console_window(&mut command);
     command.arg(format!(
         "--defaults-extra-file={}",
         context.paths.root_client_file.display()
@@ -652,6 +664,7 @@ pub fn mysql_command(context: &RuntimeContext) -> Command {
 
 pub fn mysqldump_command(context: &RuntimeContext) -> Command {
     let mut command = Command::new(&context.executables.mysqldump);
+    hide_console_window(&mut command);
     command.arg(format!(
         "--defaults-extra-file={}",
         context.paths.root_client_file.display()
@@ -699,6 +712,14 @@ fn resolve_paths(app: &AppHandle) -> Result<RuntimePaths, String> {
 }
 
 fn resolve_executables(_paths: &RuntimePaths) -> Result<RuntimeExecutables, String> {
+    #[cfg(target_os = "windows")]
+    if !_paths.resource_root.to_string_lossy().is_ascii() {
+        return Err(format!(
+            "مسار تثبيت البرنامج يحتوي على أحرف غير إنجليزية لا يدعمها MySQL المرفق حاليًا. أعد تثبيت البرنامج في مسار إنجليزي مثل D:\\ClinicDesktop. بيانات العيادة المحفوظة لن تُحذف.\nالمسار الحالي: {}",
+            _paths.resource_root.display()
+        ));
+    }
+
     #[cfg(target_os = "windows")]
     let executables = RuntimeExecutables {
         mysqld: _paths.resource_root.join("mysql/bin/mysqld.exe"),
@@ -832,11 +853,7 @@ fn write_mysql_bootstrap_file(path: &Path, config: &InstallConfig) -> Result<(),
 }
 
 fn mysql_credentials_work(context: &RuntimeContext) -> bool {
-    Command::new(&context.executables.mysql)
-        .arg(format!(
-            "--defaults-extra-file={}",
-            context.paths.root_client_file.display()
-        ))
+    mysql_command(context)
         .args(["--batch", "--skip-column-names", "-e", "SELECT 1"])
         .output()
         .map(|output| output.status.success())
@@ -853,6 +870,7 @@ fn initialize_mysql_data(
     fs::create_dir_all(&paths.mysql_data_dir)
         .map_err(|error| format!("تعذر إنشاء بيانات MySQL: {error}"))?;
     let mut command = Command::new(&executables.mysqld);
+    hide_console_window(&mut command);
     command
         .arg("--no-defaults")
         .arg("--initialize-insecure")
@@ -898,6 +916,7 @@ fn spawn_mysql(
         .try_clone()
         .map_err(|error| format!("تعذر فتح سجل MySQL: {error}"))?;
     let mut command = Command::new(&executables.mysqld);
+    hide_console_window(&mut command);
     command
         .arg("--no-defaults")
         .arg(format!("--datadir={}", paths.mysql_data_dir.display()))
@@ -941,7 +960,9 @@ fn establish_mysql_credentials(context: &RuntimeContext) -> Result<(), String> {
     );
 
     for host in ["127.0.0.1", "localhost"] {
-        let output = Command::new(&context.executables.mysql)
+        let mut command = Command::new(&context.executables.mysql);
+        hide_console_window(&mut command);
+        let output = command
             .args([
                 "--protocol=tcp",
                 &format!("--host={host}"),
@@ -1000,11 +1021,49 @@ fn wait_for_mysql_port(state: &DesktopState, port: u16) -> Result<(), String> {
                 .and_then(|value| value.try_wait().ok().flatten())
         };
         if let Some(status) = exited {
-            return Err(format!("توقفت خدمة التشغيل المحلية مبكرًا ({status})."));
+            return Err(mysql_startup_error(state, status));
         }
         thread::sleep(Duration::from_millis(250));
     }
     Err("انتهت مهلة تشغيل الخدمة المحلية.".to_string())
+}
+
+fn mysql_startup_error(state: &DesktopState, status: ExitStatus) -> String {
+    let log_path = state
+        .inner
+        .lock()
+        .ok()
+        .and_then(|inner| inner.paths.as_ref().map(|paths| paths.mysql_log.clone()));
+    let exit_code = status
+        .code()
+        .map(|code| code.to_string())
+        .unwrap_or_else(|| status.to_string());
+
+    if let Some(path) = log_path {
+        format!(
+            "توقفت خدمة MySQL المحلية مبكرًا (رمز الخروج: {exit_code}).\nآخر 12 سطرًا من سجل MySQL:\n{}\nمسار السجل: {}",
+            mysql_log_tail(&path, 12),
+            path.display()
+        )
+    } else {
+        format!("توقفت خدمة MySQL المحلية مبكرًا (رمز الخروج: {exit_code}).")
+    }
+}
+
+fn mysql_log_tail(path: &Path, line_count: usize) -> String {
+    match fs::read(path) {
+        Ok(bytes) => {
+            let text = String::from_utf8_lossy(&bytes);
+            let mut lines = text.lines().rev().take(line_count).collect::<Vec<_>>();
+            lines.reverse();
+            if lines.is_empty() {
+                "سجل MySQL فارغ.".to_string()
+            } else {
+                lines.join("\n")
+            }
+        }
+        Err(error) => format!("تعذر قراءة سجل MySQL: {error}"),
+    }
 }
 
 fn wait_for_rust_health(state: &DesktopState, port: u16) -> Result<(), String> {
@@ -1155,8 +1214,8 @@ fn set_private_permissions(_path: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        activate_new_database, available_port, escape_sql_string, health_request, quote_identifier,
-        run_async_operation, runtime_info, start_rust_api, stop_rust_api,
+        activate_new_database, available_port, escape_sql_string, health_request, mysql_log_tail,
+        quote_identifier, run_async_operation, runtime_info, start_rust_api, stop_rust_api,
     };
     use crate::{
         api,
@@ -1181,6 +1240,26 @@ mod tests {
     fn sql_values_and_identifiers_are_escaped() {
         assert_eq!(escape_sql_string("a'b\\c"), "a''b\\\\c");
         assert_eq!(quote_identifier("a`b"), "`a``b`");
+    }
+
+    #[test]
+    fn mysql_log_tail_returns_only_the_latest_lines() {
+        let path = std::env::temp_dir().join(format!(
+            "clinic-mysql-log-tail-{}.log",
+            Uuid::new_v4().simple()
+        ));
+        let contents = (1..=15)
+            .map(|line| format!("line {line}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        fs::write(&path, contents).expect("write MySQL test log");
+
+        let tail = mysql_log_tail(&path, 12);
+
+        assert_eq!(tail.lines().count(), 12);
+        assert!(tail.starts_with("line 4\n"));
+        assert!(tail.ends_with("line 15"));
+        fs::remove_file(path).expect("remove MySQL test log");
     }
 
     #[test]

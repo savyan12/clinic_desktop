@@ -1,9 +1,9 @@
 <template>
-  <v-card class="login-card" width="100%" max-width="460">
+  <v-card class="login-card" width="100%">
     <v-card-text class="login-content">
-      <div>
+      <div class="login-heading">
         <h1>تسجيل الدخول</h1>
-        <p>أدخل بيانات حسابك للوصول إلى منظومة العيادة.</p>
+        <p>استخدم حسابك المعتمد للوصول إلى مساحة العمل.</p>
       </div>
       <InlineError v-if="error" :message="error" />
       <v-form @submit.prevent="submit">
@@ -34,7 +34,7 @@
             block
             data-form-flow-primary
             :loading="auth.loading"
-          >دخول</v-btn>
+          >تسجيل الدخول</v-btn>
         </div>
       </v-form>
       <div v-if="isMock" class="mock-credentials">
@@ -91,31 +91,40 @@ async function submit() {
 
 <style scoped>
 .login-card {
-  border-radius: 18px !important;
+  border-radius: var(--radius-dialog) !important;
+  box-shadow: var(--shadow-raised) !important;
 }
 .login-content {
   display: grid;
-  gap: 24px;
-  padding: 32px !important;
+  gap: var(--space-6);
+  padding: var(--space-8) !important;
+}
+.login-heading {
+  padding-bottom: var(--space-5);
+  border-bottom: 1px solid var(--color-border);
 }
 .login-content h1 {
   margin: 0;
-  font-size: 30px;
+  color: var(--color-foreground);
+  font-size: 26px;
+  line-height: 1.35;
 }
 .login-content p {
-  margin: 6px 0 0;
-  color: var(--color-ink-muted);
+  margin: var(--space-2) 0 0;
+  color: var(--color-muted-foreground);
+  font-size: 14px;
 }
 .login-fields {
   display: grid;
-  gap: 16px;
+  gap: var(--space-4);
 }
 .mock-credentials {
   display: grid;
-  gap: 8px;
-  padding: 16px;
-  border-radius: 12px;
-  background: var(--color-parchment);
+  gap: var(--space-2);
+  padding: var(--space-4);
+  background: var(--color-surface-subtle);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
 }
 .mock-credentials strong {
   font-size: 14px;
@@ -126,18 +135,25 @@ async function submit() {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 12px;
+  padding: var(--space-2) var(--space-3);
   color: var(--color-primary);
-  border: 1px solid var(--color-hairline);
-  border-radius: 8px;
-  background: var(--color-canvas);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
   cursor: pointer;
 }
+.mock-credentials button:hover { border-color: var(--color-primary); background: var(--color-primary-subtle); }
 .mock-credentials code {
   direction: ltr;
-  color: var(--color-ink);
+  color: var(--color-foreground);
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
 }
 .mock-credentials small {
-  color: var(--color-ink-muted);
+  color: var(--color-muted-foreground);
+  line-height: 1.5;
+}
+@media (max-width: 520px) {
+  .login-content { padding: var(--space-6) var(--space-5) !important; }
 }
 </style>

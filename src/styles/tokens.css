@@ -1,37 +1,185 @@
 :root {
-  --color-primary: #0066cc;
-  --color-primary-focus: #0071e3;
-  --color-ink: #1d1d1f;
-  --color-ink-muted: #4f4f54;
-  --color-canvas: #ffffff;
-  --color-parchment: #f5f5f7;
-  --color-pearl: #fafafc;
-  --color-hairline: #e0e0e0;
-  --color-info-bg: #e8f1fc;
-  --color-success: #1a7f37;
-  --color-success-bg: #e6f4ea;
-  --color-danger: #c5221f;
-  --color-danger-bg: #fce8e6;
-  --color-danger-border: #f4b8b6;
-  --color-warning: #9a5b00;
-  --color-warning-bg: #fef3d7;
-  --color-warning-border: #edcf89;
-  --color-print-brand: #00784f;
-  --color-print-brand-dark: #00694b;
-  --color-print-tint: #eaf4ef;
-  --color-print-border: #c9d4e2;
-  --color-print-muted: #566277;
-  --radius-card: 18px;
-  --radius-field: 12px;
+  /* Surfaces */
+  --canvas: #f3f5f9;
+  --surface: #ffffff;
+  --surface-subtle: #f6f7fb;
+  --border: #e6e9f0;
+  --border-strong: #d5dae5;
+
+  /* Text */
+  --ink: #14161f;
+  --text: #344054;
+  --text-muted: #667085;
+  --text-faint: #8a91a3;
+  --text-on-dark: #ffffff;
+  --text-on-dark-muted: #a9b0c0;
+
+  /* Interaction accent — green is reserved for success and the logo */
+  --accent: #1a62e0;
+  --accent-hover: #1558d6;
+  --accent-active: #104bbd;
+  --accent-tint: #eaf1fe;
+  --accent-border: #c9dafe;
+  --accent-ring: rgba(26, 98, 224, 0.2);
+  --accent-blue-preview: #1a62e0;
+  --accent-emerald-preview: #087f5b;
+
+  /* Semantic roles */
+  --success-bg: #e2faea;
+  --success-fg: #0b7a55;
+  --success-solid: #0e9f6e;
+  --success-border: #bcebd0;
+  --warning-bg: #fff4d6;
+  --warning-fg: #9a5b00;
+  --warning-solid: #f5a524;
+  --warning-border: #f1d58c;
+  --danger-bg: #fdecea;
+  --danger-fg: #b42318;
+  --danger-solid: #e5484d;
+  --danger-border: #f3c3bf;
+  --info-bg: #eaf1fe;
+  --info-fg: #1a62e0;
+  --info-border: #c9dafe;
+  --violet-bg: #f4ecff;
+  --violet-fg: #6b3fd1;
+  --violet-border: #dfcdfa;
+
+  /* Dashboard tints */
+  --kpi-blue: #e5effb;
+  --kpi-violet: #f4ecff;
+  --kpi-green: #e2faea;
+  --kpi-amber: #fff8de;
+
+  /* Brand asset only */
+  --brand-logo-green: #0b6b3a;
+
+  /* Typography — the four roles are user configurable */
+  --font-sans: 'IBM Plex Sans Arabic', 'Noto Sans Arabic', system-ui, sans-serif;
+  --fs-body: 16px;
+  --fw-body: 400;
+  --fs-table: 15px;
+  --fw-table: 400;
+  --fs-section: 20px;
+  --fw-section: 600;
+  --fs-page: 32px;
+  --fw-page: 600;
+  --fs-caption: 13px;
+  --fs-stat: 30px;
+  --fw-stat: 700;
+  --lh-body: 1.6;
+  --lh-tight: 1.3;
+
+  /* Spacing */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+  --page-pad: 32px;
+  --card-pad: 24px;
+  --grid-gap: 20px;
+  --content-max: 1440px;
+
+  /* Shape and elevation */
+  --r-card: 18px;
+  --r-control: 12px;
+  --r-chip: 999px;
+  --control-h: 44px;
+  --control-h-sm: 36px;
+  --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04), 0 4px 12px rgba(16, 24, 40, 0.05);
+  --shadow-card-hover: 0 2px 4px rgba(16, 24, 40, 0.05), 0 10px 24px rgba(16, 24, 40, 0.08);
+  --shadow-pop: 0 12px 32px rgba(16, 24, 40, 0.14);
+  --overlay: rgba(20, 22, 31, 0.45);
+
+  /* Motion and shell */
+  --duration-fast: 120ms;
+  --duration-normal: 180ms;
+  --sidebar-w: 264px;
+  --topbar-h: 64px;
+
+  /* Compatibility aliases while screens migrate to the new system */
+  --color-primary: var(--accent);
+  --color-primary-hover: var(--accent-hover);
+  --color-primary-active: var(--accent-active);
+  --color-primary-focus: var(--accent);
+  --color-primary-subtle: var(--accent-tint);
+  --color-primary-border: var(--accent-border);
+  --color-secondary: var(--accent);
+  --color-secondary-hover: var(--accent-hover);
+  --color-secondary-active: var(--accent-active);
+  --color-accent: var(--accent);
+  --color-accent-subtle: var(--accent-tint);
+  --color-on-primary: #ffffff;
+  --color-on-secondary: #ffffff;
+  --color-on-accent: #ffffff;
+  --color-background: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-subtle: var(--surface-subtle);
+  --color-surface-raised: #fbfcfe;
+  --color-foreground: var(--ink);
+  --color-muted-foreground: var(--text-muted);
+  --color-border: var(--border);
+  --color-control-border: var(--border-strong);
+  --color-focus: var(--accent);
+  --color-overlay: var(--overlay);
+  --color-success: var(--success-fg);
+  --color-success-bg: var(--success-bg);
+  --color-success-border: var(--success-border);
+  --color-info: var(--info-fg);
+  --color-info-bg: var(--info-bg);
+  --color-info-border: var(--info-border);
+  --color-warning: var(--warning-fg);
+  --color-warning-bg: var(--warning-bg);
+  --color-warning-border: var(--warning-border);
+  --color-danger: var(--danger-fg);
+  --color-danger-hover: #971d15;
+  --color-danger-bg: var(--danger-bg);
+  --color-danger-border: var(--danger-border);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--text-muted);
+  --color-canvas: var(--surface);
+  --color-parchment: var(--canvas);
+  --color-pearl: var(--surface-subtle);
+  --color-hairline: var(--border);
+  --space-1: var(--sp-1);
+  --space-2: var(--sp-2);
+  --space-3: var(--sp-3);
+  --space-4: var(--sp-4);
+  --space-5: var(--sp-5);
+  --space-6: var(--sp-6);
+  --space-8: var(--sp-8);
+  --space-10: var(--sp-10);
+  --radius-sm: 8px;
+  --radius-md: var(--r-control);
+  --radius-lg: var(--r-card);
+  --radius-dialog: 16px;
+  --radius-pill: var(--r-chip);
+  --radius-card: var(--r-card);
+  --radius-field: var(--r-control);
   --radius-utility: 8px;
-  --radius-pill: 9999px;
-  --sidebar-width: 280px;
-  --font-body-size: 16px;
-  --font-body-weight: 400;
-  --font-table-size: 15px;
-  --font-table-weight: 400;
-  --font-heading-size: 32px;
-  --font-heading-weight: 600;
-  --font-section-size: 22px;
-  --font-section-weight: 600;
+  --shadow-raised: var(--shadow-card);
+  --shadow-overlay: var(--shadow-pop);
+  --sidebar-width: var(--sidebar-w);
+  --topbar-height: var(--topbar-h);
+  --content-max-width: var(--content-max);
+  --font-body-size: var(--fs-body);
+  --font-body-weight: var(--fw-body);
+  --font-table-size: var(--fs-table);
+  --font-table-weight: var(--fw-table);
+  --font-heading-size: var(--fs-page);
+  --font-heading-weight: var(--fw-page);
+  --font-section-size: var(--fs-section);
+  --font-section-weight: var(--fw-section);
+}
+
+html[data-accent='emerald'] {
+  --accent: #087f5b;
+  --accent-hover: #067350;
+  --accent-active: #055f43;
+  --accent-tint: #e8fff9;
+  --accent-border: #bdebdc;
+  --accent-ring: rgba(8, 127, 91, 0.2);
 }

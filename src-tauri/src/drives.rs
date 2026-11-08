@@ -1,4 +1,6 @@
 use crate::models::RemovableDrive;
+#[cfg(target_os = "windows")]
+use crate::runtime;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -51,7 +53,9 @@ fn list_windows_drives() -> Result<Vec<RemovableDrive>, String> {
         "@(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=2' | ",
         "Select-Object DeviceID,VolumeName,FreeSpace) | ConvertTo-Json -Compress"
     );
-    let output = Command::new("powershell.exe")
+    let mut command = Command::new("powershell.exe");
+    runtime::hide_console_window(&mut command);
+    let output = command
         .args([
             "-NoLogo",
             "-NoProfile",

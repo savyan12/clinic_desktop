@@ -37,11 +37,11 @@
       <section class="balance-strip" aria-label="ملخص الأرصدة">
         <div>
           <span>الرصيد المدفوع مسبقًا</span>
-          <MoneyText :value="patient.wallet_balance" />
+          <MoneyText :value="patient.wallet_balance" classic />
         </div>
         <div>
           <span>الديون القائمة</span>
-          <MoneyText :value="patient.debt_total" />
+          <MoneyText :value="patient.debt_total" classic />
         </div>
       </section>
 
@@ -64,9 +64,9 @@
               <tr v-for="debt in patient.debts" :key="debt.id">
                 <td><bdi dir="ltr">#{{ debt.id }}</bdi></td>
                 <td>{{ labelFor('debtKind', debt.kind) }}</td>
-                <td><MoneyText :value="debt.amount" /></td>
-                <td><MoneyText :value="debt.paid_amount" /></td>
-                <td><MoneyText :value="debt.remaining" /></td>
+                <td><MoneyText :value="debt.amount" classic /></td>
+                <td><MoneyText :value="debt.paid_amount" classic /></td>
+                <td><MoneyText :value="debt.remaining" classic /></td>
                 <td>{{ labelFor('debtStatus', debt.status) }}</td>
               </tr>
               <tr v-if="!patient.debts.length">
@@ -100,7 +100,7 @@
                 <td>{{ labelFor('paymentType', payment.type) }}</td>
                 <td>{{ patient.name }}</td>
                 <td>{{ labelFor('paymentMethod', payment.method) }}</td>
-                <td class="payment-amount"><MoneyText :value="payment.amount" /></td>
+                <td class="payment-amount"><MoneyText :value="payment.amount" classic /></td>
               </tr>
               <tr v-if="!sortedPayments.length">
                 <td colspan="5" class="empty-line">لا توجد حركات مالية خلال الفترة</td>
@@ -113,15 +113,15 @@
       <section class="statement-totals" aria-label="ملخص المدفوعات">
         <div>
           <span>المقبوضات</span>
-          <MoneyText :value="receiptsTotal" />
+          <MoneyText :value="receiptsTotal" classic />
         </div>
         <div>
           <span>الاسترجاعات</span>
-          <MoneyText :value="refundsTotal" />
+          <MoneyText :value="refundsTotal" classic />
         </div>
         <div class="net-total">
           <strong>الصافي</strong>
-          <MoneyText :value="netTotal" />
+          <MoneyText :value="netTotal" classic />
         </div>
       </section>
 

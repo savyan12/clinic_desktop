@@ -37,6 +37,7 @@
           v-bind="props"
           icon="mdi-dots-vertical"
           variant="text"
+          aria-label="إجراءات الخدمة"
         /></template><v-list density="compact"><v-list-item
           prepend-icon="mdi-pencil-outline"
           title="تعديل"
@@ -150,6 +151,7 @@ async function load() {
 function openCreate() {
   editing.value = false;
   selected.value = null;
+  Object.keys(fieldErrors).forEach((key) => delete fieldErrors[key]);
   Object.assign(form, { name: "", price: null, included_units: null, unit_name: "", extra_unit_price: null, is_active: true, reason: "" });
   dialogError.value = "";
   dialog.value = true;
@@ -157,6 +159,7 @@ function openCreate() {
 function openEdit(service) {
   editing.value = true;
   selected.value = service;
+  Object.keys(fieldErrors).forEach((key) => delete fieldErrors[key]);
   Object.assign(form, {
     name: service.name,
     price: Number(service.price),
@@ -175,6 +178,8 @@ function askToggle(service) {
 }
 async function save() {
   saving.value = true;
+  dialogError.value = "";
+  Object.keys(fieldErrors).forEach((key) => delete fieldErrors[key]);
   try {
     const hasAddons = form.included_units !== null && form.included_units !== "";
     const payload = { ...form, price: decimal(form.price), included_units: hasAddons ? Number(form.included_units) : null, unit_name: hasAddons ? form.unit_name : null, extra_unit_price: hasAddons ? decimal(form.extra_unit_price) : null };
@@ -242,7 +247,7 @@ const formatDate = (value) =>
 }
 .dialog-title {
   padding: 24px 24px 4px;
-  font-size: 22px;
+  font-size: var(--font-section-size);
   font-weight: 600;
 }
 .dialog-content {

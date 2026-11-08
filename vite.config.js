@@ -23,6 +23,7 @@ export default defineConfig({
       'vuetify/components/VCheckbox',
       'vuetify/components/VChip',
       'vuetify/components/VDialog',
+      'vuetify/components/VDivider',
       'vuetify/components/VForm',
       'vuetify/components/VGrid',
       'vuetify/components/VIcon',
@@ -32,6 +33,8 @@ export default defineConfig({
       'vuetify/components/VMenu',
       'vuetify/components/VNavigationDrawer',
       'vuetify/components/VPagination',
+      'vuetify/components/VProgressCircular',
+      'vuetify/components/VProgressLinear',
       'vuetify/components/VSelect',
       'vuetify/components/VSkeletonLoader',
       'vuetify/components/VSlider',
@@ -46,6 +49,7 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    strictPort: true,
     proxy: {
       '/api': {
         target: 'http://localhost:8000',

@@ -64,11 +64,11 @@ The source configuration does not establish that a release is signed. If Windows
 
 1. Sign in to the intended Windows account and close any running copy of the clinic application.
 2. Copy the verified installer to a local folder and open it. Choose Arabic or English in the installer language selector.
-3. Keep the offered installation directory unless there is an approved reason to change it. Do not use a USB drive or a shared/synchronized network folder for the live installation/data.
+3. The Windows package uses the ASCII product name **`Ain Alhayat Clinic`** so its default application folder is compatible with the bundled MySQL runtime. Confirm that the full offered path contains English/ASCII characters only. If any parent folder contains Arabic or other non-ASCII characters, choose a local path such as **`D:\ClinicDesktop`**. Do not use a USB drive or a shared/synchronized network folder for the live installation/data.
 4. Allow the included WebView2 and Visual C++ prerequisites to install. If a trusted prerequisite asks for administrator approval, have the authorized administrator approve it.
 5. Wait for completion. If prerequisite installation fails, stop and record the message; do not treat a partially installed application as ready.
 6. Restart Windows if a prerequisite requests it. The VC++ hook marks exit code `3010` as restart required but uses `/norestart`, so it will not force a restart. An equal/newer x64 runtime is accepted after checking its installed version; failed installation or an unverified `1638` result stops the installer with an error.
-7. Launch **`منظومة عيادة عين الحياة`** from the installed shortcut/Start menu. The configured Start menu folder is **`عيادة عين الحياة`**; use the actual release's name if branding changes.
+7. Launch **`Ain Alhayat Clinic`** from the installed shortcut inside the configured Start Menu folder **`عيادة عين الحياة`**. The application window itself remains titled **`منظومة عيادة عين الحياة`**.
 8. Continue with section 5 for a genuinely new clinic, or section 7 for a backup transfer. An already activated installation should start its existing database and go to login, not require new activation.
 
 No customer `.env` editing, database creation command, port forwarding, or public firewall rule is part of these steps. Ports such as `5173` and `8000` are development examples, not fixed ports of the installed desktop application.

@@ -48,14 +48,14 @@
       @page="changePage"
     >
       <template #rows="{ items }">
-        <tr v-for="entry in items" :key="entry.id" class="clickable-row" @click="openDetails(entry)">
+        <tr v-for="entry in items" :key="entry.id">
           <td>{{ formatAuditTimestamp(entry.created_at) }}</td>
           <td><strong>{{ auditUserLabel(entry) }}</strong></td>
           <td>{{ auditActionLabel(entry.action) }}</td>
           <td>{{ auditRecordLabel(entry.entity_type, entry.entity_id) }}</td>
           <td>{{ formatAuditReason(entry.reason) }}</td>
           <td>
-            <v-btn variant="text" color="primary" @click.stop="openDetails(entry)">
+            <v-btn variant="text" color="primary" @click="openDetails(entry)">
               عرض التغيير
             </v-btn>
           </td>
@@ -177,7 +177,7 @@ const headers = [
   { title: 'العملية', key: 'action' },
   { title: 'السجل المتأثر', key: 'entity' },
   { title: 'السبب', key: 'reason' },
-  { title: '', key: 'details' },
+  { title: 'التفاصيل', key: 'details' },
 ]
 const selectedChanges = computed(() => buildAuditChanges(selected.value || {}))
 
@@ -332,7 +332,7 @@ function auditUserLabel(entry) {
   max-height: min(52vh, 520px);
   overflow: auto;
   border: 1px solid var(--color-hairline);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   overscroll-behavior: contain;
 }
 

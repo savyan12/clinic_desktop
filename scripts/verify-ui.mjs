@@ -68,6 +68,7 @@ try {
   } = await server.ssrLoadModule('/src/constants/reports.js')
   const { cachedLookup, invalidateLookupAfter } = await server.ssrLoadModule('/src/api/lookupCache.js')
   const { useDialogOptions } = await server.ssrLoadModule('/src/composables/useDialogOptions.js')
+  const { applyTypographySettings } = await server.ssrLoadModule('/src/utils/typography.js')
   const { default: http } = await server.ssrLoadModule('/src/api/client.js')
   const { default: SessionDialog } = await server.ssrLoadModule('/src/components/sessions/NewSessionDialog.vue')
   const { default: Autocomplete } = await server.ssrLoadModule('/src/components/common/PatientAutocomplete.vue')
@@ -78,6 +79,41 @@ try {
     calls.push(config)
     return { config, data: await handle(config), status: 200, statusText: 'OK', headers: {} }
   }
+
+  await check('Saved typography updates design tokens and compatibility aliases', async () => {
+    const originalDocument = globalThis.document
+    const properties = new Map()
+    globalThis.document = {
+      documentElement: {
+        style: { setProperty: (name, value) => properties.set(name, value) },
+      },
+    }
+    try {
+      applyTypographySettings({
+        body_font_size: 20,
+        body_font_weight: 600,
+        table_font_size: 18,
+        table_font_weight: 600,
+        heading_font_size: 36,
+        heading_font_weight: 400,
+        section_font_size: 28,
+        section_font_weight: 400,
+      })
+    } finally {
+      globalThis.document = originalDocument
+    }
+
+    assert.equal(properties.get('--fs-body'), '20px')
+    assert.equal(properties.get('--fw-body'), '600')
+    assert.equal(properties.get('--fs-table'), '18px')
+    assert.equal(properties.get('--fw-table'), '600')
+    assert.equal(properties.get('--fs-page'), '36px')
+    assert.equal(properties.get('--fw-page'), '400')
+    assert.equal(properties.get('--fs-section'), '28px')
+    assert.equal(properties.get('--fw-section'), '400')
+    assert.equal(properties.get('--font-heading-size'), '36px')
+    assert.equal(properties.get('--font-section-weight'), '400')
+  })
 
   await check('Audit actions used by both backends have centralized Arabic labels', async () => {
     const actionKeys = [

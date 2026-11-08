@@ -37,5 +37,5 @@ async function save() { saving.value = true; try { const response = await create
 </script>
 
 <style scoped>
-.dialog-title { padding: 24px 24px 4px; font-size: 22px; font-weight: 600; }.dialog-content { display: grid; gap: 16px; padding: 12px 24px !important; }.due-row { display: flex; justify-content: space-between; padding: 14px; border-radius: 12px; background: var(--color-info-bg); }.due-row :deep(.money-text) { color: var(--color-primary); font-size: 20px; font-weight: 600; }.dialog-actions { gap: 8px; justify-content: flex-end; padding: 12px 24px 24px; }
+.dialog-title { padding: 24px 24px 4px; font-size: var(--font-section-size); font-weight: 600; }.dialog-content { display: grid; gap: 16px; padding: 12px 24px !important; }.due-row { display: flex; justify-content: space-between; padding: 14px; border: 1px solid var(--color-primary-border); border-radius: var(--radius-md); background: var(--color-primary-subtle); }.due-row :deep(.money-text) { color: var(--color-primary); font-size: 20px; font-weight: 600; }.dialog-actions { gap: 8px; justify-content: flex-end; padding: 12px 24px 24px; }
 </style>

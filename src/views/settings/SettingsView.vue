@@ -1,17 +1,68 @@
 <template>
   <div class="page-container page-stack" data-form-flow-scope>
-    <PageHeader title="إعدادات النظام" subtitle="الطباعة والخطوط والنسخ الاحتياطي المحلي">
-      <template #actions><v-btn color="primary" prepend-icon="mdi-content-save-outline" data-form-flow-primary :loading="saving" @click="save">حفظ الإعدادات</v-btn></template>
+    <PageHeader
+      title="إعدادات النظام"
+      subtitle="الطباعة والخطوط والنسخ الاحتياطي المحلي"
+    >
+      <template #actions
+        ><v-btn
+          color="primary"
+          prepend-icon="mdi-content-save-outline"
+          data-form-flow-primary
+          :loading="saving"
+          @click="save"
+          >حفظ الإعدادات</v-btn
+        ></template
+      >
     </PageHeader>
     <v-skeleton-loader v-if="loading" type="heading, article, image" />
     <InlineError v-else-if="error" :message="error" retry @retry="load" />
     <div v-else class="settings-content page-stack">
+      <section class="surface-card settings-section accent-review-section">
+        <div>
+          <h2 class="section-heading">لون التفاعل — معاينة مؤقتة</h2>
+          <p>
+            يغيّر لون الأزرار والروابط والعنصر النشط فقط، بينما تبقى ألوان
+            الحالات دلالية وثابتة.
+          </p>
+        </div>
+        <v-btn-toggle
+          v-model="accentChoice"
+          mandatory
+          color="primary"
+          variant="outlined"
+          class="segmented-control"
+          aria-label="اختيار لون التفاعل"
+          @update:model-value="applyAccent"
+        >
+          <v-btn value="blue"
+            ><span
+              class="accent-swatch swatch-blue"
+              aria-hidden="true"
+            />أزرق</v-btn
+          >
+          <v-btn value="emerald"
+            ><span
+              class="accent-swatch swatch-emerald"
+              aria-hidden="true"
+            />زمردي</v-btn
+          >
+        </v-btn-toggle>
+      </section>
+
       <section class="surface-card settings-section">
         <h2 class="section-heading">وضوح النص وأحجام الخطوط</h2>
-        <p>اختر الحجم والوزن المناسبين. تُعرض القيمة الفعلية بالبكسل وتظهر النتيجة مباشرة في معاينة كل مجموعة.</p>
+        <p>
+          اختر الحجم والوزن المناسبين. تُعرض القيمة الفعلية بالبكسل وتظهر
+          النتيجة مباشرة في معاينة كل مجموعة.
+        </p>
 
         <div class="typography-grid">
-          <article v-for="control in typographyControls" :key="control.sizeKey" class="type-control">
+          <article
+            v-for="control in typographyControls"
+            :key="control.sizeKey"
+            class="type-control"
+          >
             <div class="type-control-main">
               <div class="type-control-heading">
                 <strong>{{ control.label }}</strong>
@@ -28,20 +79,25 @@
                   mandatory
                   color="primary"
                   variant="outlined"
-                  class="segmented-toggle size-toggle"
+                  class="segmented-control segmented-toggle size-toggle"
                   role="radiogroup"
                   :aria-label="`حجم ${control.label}`"
-                  @keydown="handleSegmentKeydown($event, control.sizeKey, control.sizes)"
+                  @keydown="
+                    handleSegmentKeydown($event, control.sizeKey, control.sizes)
+                  "
                 >
                   <v-btn
                     v-for="option in control.sizes"
                     :key="option.value"
                     :value="option.value"
-                    :data-segment-option="segmentOptionId(control.sizeKey, option.value)"
+                    :data-segment-option="
+                      segmentOptionId(control.sizeKey, option.value)
+                    "
                     role="radio"
                     :aria-checked="form[control.sizeKey] === option.value"
                     :aria-label="`${option.title}، ${option.value} بكسل`"
-                  >{{ option.title }}</v-btn>
+                    >{{ option.title }}</v-btn
+                  >
                 </v-btn-toggle>
               </div>
 
@@ -52,16 +108,20 @@
                   mandatory
                   color="primary"
                   variant="outlined"
-                  class="segmented-toggle weight-toggle"
+                  class="segmented-control segmented-toggle weight-toggle"
                   role="radiogroup"
                   :aria-label="`وزن ${control.label}`"
-                  @keydown="handleSegmentKeydown($event, control.weightKey, fontWeights)"
+                  @keydown="
+                    handleSegmentKeydown($event, control.weightKey, fontWeights)
+                  "
                 >
                   <v-btn
                     v-for="option in fontWeights"
                     :key="option.value"
                     :value="option.value"
-                    :data-segment-option="segmentOptionId(control.weightKey, option.value)"
+                    :data-segment-option="
+                      segmentOptionId(control.weightKey, option.value)
+                    "
                     role="radio"
                     :aria-checked="form[control.weightKey] === option.value"
                     :aria-label="`${option.title}، وزن ${option.value}`"
@@ -75,8 +135,15 @@
 
             <aside class="type-sample" aria-live="polite">
               <span>معاينة حيّة</span>
-              <strong :style="previewStyleFor(control)">{{ control.preview }}</strong>
-              <small><bdi dir="ltr">{{ form[control.sizeKey] }} px · {{ form[control.weightKey] }}</bdi></small>
+              <strong :style="previewStyleFor(control)">{{
+                control.preview
+              }}</strong>
+              <small
+                ><bdi dir="ltr"
+                  >{{ form[control.sizeKey] }} px ·
+                  {{ form[control.weightKey] }}</bdi
+                ></small
+              >
             </aside>
           </article>
         </div>
@@ -84,201 +151,330 @@
 
       <section class="surface-card settings-section">
         <h2 class="section-heading">العملة والطباعة</h2>
-        <p>الأرقام لاتينية دون فاصل آلاف، وبحد أقصى 3 منازل عشرية باستخدام النقطة.</p>
+        <p>
+          الأرقام لاتينية مع فاصل آلاف، وبحد أقصى 3 منازل عشرية باستخدام النقطة.
+        </p>
         <div class="form-grid">
           <v-text-field v-model="form.currency" label="رمز العملة" />
           <v-text-field model-value="80 د.ل" label="معاينة التنسيق" disabled />
-          <v-select v-model="form.print_size" label="الحجم الافتراضي" :items="['A4', 'A5']" />
-          <v-switch v-model="form.show_logo" label="إظهار علامة المركز" color="primary" hide-details />
+          <v-select
+            v-model="form.print_size"
+            label="الحجم الافتراضي"
+            :items="['A4', 'A5']"
+          />
+          <v-switch
+            v-model="form.show_logo"
+            label="إظهار علامة المركز"
+            color="primary"
+            hide-details
+          />
         </div>
       </section>
 
-      <section v-if="desktop.isDesktop" class="surface-card settings-section" data-form-flow-scope>
-        <div class="section-row"><div><h2 class="section-heading">نسخة احتياطية على USB</h2><p>يُنشأ مجلد بتاريخ اليوم، وتُفحص البصمة ثم تُجرّب الاستعادة في قاعدة مؤقتة قبل اعتماد النسخة.</p></div><v-btn variant="outlined" prepend-icon="mdi-refresh" :loading="loadingDrives" @click="refreshDrives">تحديث الوحدات</v-btn></div>
+      <section
+        v-if="desktop.isDesktop"
+        class="surface-card settings-section"
+        data-form-flow-scope
+      >
+        <div class="section-row">
+          <div>
+            <h2 class="section-heading">نسخة احتياطية على USB</h2>
+            <p>
+              يُنشأ مجلد بتاريخ اليوم، وتُفحص البصمة ثم تُجرّب الاستعادة في
+              قاعدة مؤقتة قبل اعتماد النسخة.
+            </p>
+          </div>
+          <v-btn
+            variant="outlined"
+            prepend-icon="mdi-refresh"
+            :loading="loadingDrives"
+            @click="refreshDrives"
+            >تحديث الوحدات</v-btn
+          >
+        </div>
         <InlineError v-if="backupError" :message="backupError" />
-        <v-select v-model="selectedDrive" label="اختر وحدة USB" :items="desktop.drives" :item-title="driveTitle" item-value="id" no-data-text="لا توجد وحدة USB متصلة" />
-        <div class="backup-warning"><v-icon icon="mdi-usb-flash-drive-outline" /><span>لا تنزع وحدة USB أثناء النسخ أو التحقق. لا تُعد النسخة ناجحة إلا بعد ظهور رسالة اكتمال التحقق.</span></div>
-        <div v-if="backupResult" class="backup-result"><v-icon icon="mdi-shield-check-outline" /><div><strong>تم إنشاء نسخة موثقة ومجرّبة الاستعادة</strong><span>{{ backupResult.folder }}</span><span>{{ formatDate(backupResult.created_at) }} · {{ formatBytes(backupResult.dump_size) }}</span></div></div>
-        <div class="backup-actions"><v-btn color="primary" prepend-icon="mdi-database-export-outline" data-form-flow-primary :disabled="!selectedDrive" :loading="backingUp" @click="createBackup">إنشاء النسخة والتحقق منها</v-btn></div>
+        <v-select
+          v-model="selectedDrive"
+          label="اختر وحدة USB"
+          :items="desktop.drives"
+          :item-title="driveTitle"
+          item-value="id"
+          no-data-text="لا توجد وحدة USB متصلة"
+        />
+        <div class="backup-warning">
+          <v-icon icon="mdi-usb-flash-drive-outline" /><span
+            >لا تنزع وحدة USB أثناء النسخ أو التحقق. لا تُعد النسخة ناجحة إلا
+            بعد ظهور رسالة اكتمال التحقق.</span
+          >
+        </div>
+        <div v-if="backupResult" class="backup-result">
+          <v-icon icon="mdi-shield-check-outline" />
+          <div>
+            <strong>تم إنشاء نسخة موثقة ومجرّبة الاستعادة</strong
+            ><span>{{ backupResult.folder }}</span
+            ><span
+              >{{ formatDate(backupResult.created_at) }} ·
+              {{ formatBytes(backupResult.dump_size) }}</span
+            >
+          </div>
+        </div>
+        <div class="backup-actions">
+          <v-btn
+            color="primary"
+            prepend-icon="mdi-database-export-outline"
+            data-form-flow-primary
+            :disabled="!selectedDrive"
+            :loading="backingUp"
+            @click="createBackup"
+            >إنشاء النسخة والتحقق منها</v-btn
+          >
+        </div>
       </section>
     </div>
   </div>
 </template>
 
 <script setup>
-import { nextTick, onMounted, reactive, ref } from 'vue'
-import { getSettings, updateSettings } from '@/api/settings'
-import InlineError from '@/components/common/InlineError.vue'
-import PageHeader from '@/components/common/PageHeader.vue'
-import { desktopErrorMessage } from '@/desktop/bridge'
-import { useDesktopStore } from '@/stores/desktop'
-import { useUiStore } from '@/stores/ui'
-import { applyTypographySettings } from '@/utils/typography'
+import { nextTick, onMounted, reactive, ref } from "vue";
+import { getSettings, updateSettings } from "@/api/settings";
+import InlineError from "@/components/common/InlineError.vue";
+import PageHeader from "@/components/common/PageHeader.vue";
+import { desktopErrorMessage } from "@/desktop/bridge";
+import { useDesktopStore } from "@/stores/desktop";
+import { useUiStore } from "@/stores/ui";
+import { applyTypographySettings } from "@/utils/typography";
 
-const ui = useUiStore()
-const desktop = useDesktopStore()
-const form = reactive({ clinic_name: '', clinic_subtitle: '', phone: '', address: '', receipt_footer: '', currency: 'د.ل', print_size: 'A4', show_logo: true, body_font_size: 16, body_font_weight: 400, table_font_size: 15, table_font_weight: 400, heading_font_size: 32, heading_font_weight: 600, section_font_size: 22, section_font_weight: 600 })
-const loading = ref(true)
-const error = ref('')
-const saving = ref(false)
-const loadingDrives = ref(false)
-const backingUp = ref(false)
-const backupError = ref('')
-const backupResult = ref(null)
-const selectedDrive = ref(null)
-const fontWeights = [{ title: 'عادي', value: 400 }, { title: 'بارز', value: 600 }]
-const sizeLabels = ['صغير', 'متوسط', 'كبير', 'كبير جدًا']
-const sizeOptions = (values) => values.map((value, index) => ({ title: sizeLabels[index], value }))
+const ui = useUiStore();
+const desktop = useDesktopStore();
+const form = reactive({
+  clinic_name: "",
+  clinic_subtitle: "",
+  phone: "",
+  address: "",
+  receipt_footer: "",
+  currency: "د.ل",
+  print_size: "A4",
+  show_logo: true,
+  body_font_size: 16,
+  body_font_weight: 400,
+  table_font_size: 15,
+  table_font_weight: 400,
+  heading_font_size: 28,
+  heading_font_weight: 600,
+  section_font_size: 20,
+  section_font_weight: 600,
+});
+const loading = ref(true);
+const error = ref("");
+const saving = ref(false);
+const loadingDrives = ref(false);
+const backingUp = ref(false);
+const backupError = ref("");
+const backupResult = ref(null);
+const selectedDrive = ref(null);
+const accentChoice = ref(localStorage.getItem("clinic-accent") || "blue");
+const fontWeights = [
+  { title: "عادي", value: 400 },
+  { title: "بارز", value: 600 },
+];
+const sizeLabels = ["صغير", "متوسط", "كبير", "كبير جدًا"];
+const sizeOptions = (values) =>
+  values.map((value, index) => ({ title: sizeLabels[index], value }));
 const typographyControls = [
   {
-    label: 'النص العام',
-    description: 'النص المستخدم داخل البطاقات والنماذج.',
-    preview: 'نص واضح وسهل القراءة',
-    sizeKey: 'body_font_size',
-    weightKey: 'body_font_weight',
+    label: "النص العام",
+    description: "النص المستخدم داخل البطاقات والنماذج.",
+    preview: "نص واضح وسهل القراءة",
+    sizeKey: "body_font_size",
+    weightKey: "body_font_weight",
     sizes: sizeOptions([14, 16, 18, 20]),
     defaultSize: 16,
     defaultWeight: 400,
   },
   {
-    label: 'نص الجداول',
-    description: 'القيم والعناوين داخل الجداول.',
-    preview: 'اسم المريض وقيمة الجلسة',
-    sizeKey: 'table_font_size',
-    weightKey: 'table_font_weight',
+    label: "نص الجداول",
+    description: "القيم والعناوين داخل الجداول.",
+    preview: "اسم المريض وقيمة الجلسة",
+    sizeKey: "table_font_size",
+    weightKey: "table_font_weight",
     sizes: sizeOptions([13, 15, 17, 18]),
     defaultSize: 15,
     defaultWeight: 400,
   },
   {
-    label: 'عنوان الصفحة',
-    description: 'العنوان الرئيسي أعلى كل صفحة.',
-    preview: 'إعدادات النظام',
-    sizeKey: 'heading_font_size',
-    weightKey: 'heading_font_weight',
-    sizes: sizeOptions([24, 32, 36, 40]),
-    defaultSize: 32,
+    label: "عنوان الصفحة",
+    description: "العنوان الرئيسي أعلى كل صفحة.",
+    preview: "إعدادات النظام",
+    sizeKey: "heading_font_size",
+    weightKey: "heading_font_weight",
+    sizes: sizeOptions([24, 28, 32, 36]),
+    defaultSize: 28,
     defaultWeight: 600,
   },
   {
-    label: 'عنوان القسم',
-    description: 'عناوين البطاقات والأقسام الداخلية.',
-    preview: 'بيانات الجلسة',
-    sizeKey: 'section_font_size',
-    weightKey: 'section_font_weight',
-    sizes: sizeOptions([18, 22, 25, 28]),
-    defaultSize: 22,
+    label: "عنوان القسم",
+    description: "عناوين البطاقات والأقسام الداخلية.",
+    preview: "بيانات الجلسة",
+    sizeKey: "section_font_size",
+    weightKey: "section_font_weight",
+    sizes: sizeOptions([18, 20, 24, 28]),
+    defaultSize: 20,
     defaultWeight: 600,
   },
-]
+];
 
-onMounted(async () => { await load(); if (desktop.isDesktop) await refreshDrives() })
+onMounted(async () => {
+  applyAccent(accentChoice.value);
+  await load();
+  if (desktop.isDesktop) await refreshDrives();
+});
+
+function applyAccent(value) {
+  accentChoice.value = value || "blue";
+  if (accentChoice.value === "emerald")
+    document.documentElement.dataset.accent = "emerald";
+  else delete document.documentElement.dataset.accent;
+  localStorage.setItem("clinic-accent", accentChoice.value);
+}
 
 async function load() {
-  loading.value = true
-  error.value = ''
+  loading.value = true;
+  error.value = "";
   try {
-    const settings = (await getSettings()).data
-    Object.assign(form, settings)
-    normalizeTypographySelections()
-    applyTypographySettings(form)
+    const settings = (await getSettings()).data;
+    Object.assign(form, settings);
+    normalizeTypographySelections();
+    applyTypographySettings(form);
   } catch (apiError) {
-    error.value = apiError.message
+    error.value = apiError.message;
   } finally {
-    loading.value = false
+    loading.value = false;
   }
 }
 
 async function save() {
-  saving.value = true
+  saving.value = true;
   try {
-    const settings = (await updateSettings(form)).data
-    Object.assign(form, settings)
-    normalizeTypographySelections()
-    applyTypographySettings(form)
-    ui.showSnackbar('تم حفظ إعدادات الطباعة وأحجام الخطوط.')
+    const settings = (await updateSettings(form)).data;
+    Object.assign(form, settings);
+    normalizeTypographySelections();
+    applyTypographySettings(form);
+    ui.showSnackbar("تم حفظ إعدادات الطباعة وأحجام الخطوط.");
   } catch (apiError) {
-    ui.showSnackbar(apiError.message, 'error')
+    ui.showSnackbar(apiError.message, "error");
   } finally {
-    saving.value = false
+    saving.value = false;
   }
 }
 
 function closestOptionValue(value, options, fallback) {
-  const numericValue = Number(value)
-  if (!Number.isFinite(numericValue)) return fallback
-  return options.reduce((closest, option) => (
-    Math.abs(option.value - numericValue) < Math.abs(closest - numericValue)
-      ? option.value
-      : closest
-  ), options[0].value)
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return fallback;
+  return options.reduce(
+    (closest, option) =>
+      Math.abs(option.value - numericValue) < Math.abs(closest - numericValue)
+        ? option.value
+        : closest,
+    options[0].value,
+  );
 }
 
 function normalizeTypographySelections() {
   typographyControls.forEach((control) => {
-    form[control.sizeKey] = closestOptionValue(form[control.sizeKey], control.sizes, control.defaultSize)
-    form[control.weightKey] = closestOptionValue(form[control.weightKey], fontWeights, control.defaultWeight)
-  })
+    form[control.sizeKey] = closestOptionValue(
+      form[control.sizeKey],
+      control.sizes,
+      control.defaultSize,
+    );
+    form[control.weightKey] = closestOptionValue(
+      form[control.weightKey],
+      fontWeights,
+      control.defaultWeight,
+    );
+  });
 }
 
 const previewStyleFor = (control) => ({
   fontSize: `${form[control.sizeKey]}px`,
   fontWeight: form[control.weightKey],
-})
+});
 
-const segmentOptionId = (key, value) => `${key}-${value}`
+const segmentOptionId = (key, value) => `${key}-${value}`;
 
 async function handleSegmentKeydown(event, key, options) {
-  const values = options.map((option) => option.value)
-  const currentIndex = Math.max(0, values.indexOf(form[key]))
-  let nextIndex = currentIndex
+  const values = options.map((option) => option.value);
+  const currentIndex = Math.max(0, values.indexOf(form[key]));
+  let nextIndex = currentIndex;
 
-  if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') nextIndex = Math.min(values.length - 1, currentIndex + 1)
-  else if (event.key === 'ArrowRight' || event.key === 'ArrowUp') nextIndex = Math.max(0, currentIndex - 1)
-  else if (event.key === 'Home') nextIndex = 0
-  else if (event.key === 'End') nextIndex = values.length - 1
-  else return
+  if (event.key === "ArrowLeft" || event.key === "ArrowDown")
+    nextIndex = Math.min(values.length - 1, currentIndex + 1);
+  else if (event.key === "ArrowRight" || event.key === "ArrowUp")
+    nextIndex = Math.max(0, currentIndex - 1);
+  else if (event.key === "Home") nextIndex = 0;
+  else if (event.key === "End") nextIndex = values.length - 1;
+  else return;
 
-  event.preventDefault()
-  const nextValue = values[nextIndex]
-  form[key] = nextValue
-  await nextTick()
-  document.querySelector(`[data-segment-option="${segmentOptionId(key, nextValue)}"]`)?.focus()
+  event.preventDefault();
+  const nextValue = values[nextIndex];
+  form[key] = nextValue;
+  await nextTick();
+  document
+    .querySelector(`[data-segment-option="${segmentOptionId(key, nextValue)}"]`)
+    ?.focus();
 }
 
 async function refreshDrives() {
-  loadingDrives.value = true
-  backupError.value = ''
+  loadingDrives.value = true;
+  backupError.value = "";
   try {
-    await desktop.refreshDrives()
-    if (!desktop.drives.some((drive) => drive.id === selectedDrive.value)) selectedDrive.value = null
+    await desktop.refreshDrives();
+    if (!desktop.drives.some((drive) => drive.id === selectedDrive.value))
+      selectedDrive.value = null;
   } catch (cause) {
-    backupError.value = desktopErrorMessage(cause, 'تعذر قراءة وحدات USB المتصلة.')
+    backupError.value = desktopErrorMessage(
+      cause,
+      "تعذر قراءة وحدات USB المتصلة.",
+    );
   } finally {
-    loadingDrives.value = false
+    loadingDrives.value = false;
   }
 }
 
 async function createBackup() {
-  backingUp.value = true
-  backupError.value = ''
-  backupResult.value = null
+  backingUp.value = true;
+  backupError.value = "";
+  backupResult.value = null;
   try {
-    backupResult.value = await desktop.createBackup(selectedDrive.value)
-    ui.showSnackbar('تم إنشاء النسخة على USB والتحقق من البصمة ونجاح الاستعادة التجريبية.')
+    backupResult.value = await desktop.createBackup(selectedDrive.value);
+    ui.showSnackbar(
+      "تم إنشاء النسخة على USB والتحقق من البصمة ونجاح الاستعادة التجريبية.",
+    );
   } catch (cause) {
-    backupError.value = desktopErrorMessage(cause, 'تعذر إنشاء النسخة الاحتياطية.')
-    ui.showSnackbar('لم تُعتمد النسخة الاحتياطية لأن التحقق لم يكتمل.', 'error')
+    backupError.value = desktopErrorMessage(
+      cause,
+      "تعذر إنشاء النسخة الاحتياطية.",
+    );
+    ui.showSnackbar(
+      "لم تُعتمد النسخة الاحتياطية لأن التحقق لم يكتمل.",
+      "error",
+    );
   } finally {
-    backingUp.value = false
+    backingUp.value = false;
   }
 }
 
-const driveTitle = (drive) => `${drive.label} — ${drive.path}${drive.free_bytes ? ` (${formatBytes(drive.free_bytes)} متاح)` : ''}`
-const formatDate = (value) => new Intl.DateTimeFormat('ar-LY-u-nu-latn', { dateStyle: 'long', timeStyle: 'short' }).format(new Date(value))
+const driveTitle = (drive) =>
+  `${drive.label} — ${drive.path}${drive.free_bytes ? ` (${formatBytes(drive.free_bytes)} متاح)` : ""}`;
+const formatDate = (value) =>
+  new Intl.DateTimeFormat("ar-LY-u-nu-latn", {
+    dateStyle: "long",
+    timeStyle: "short",
+  }).format(new Date(value));
 function formatBytes(value) {
-  const bytes = Number(value || 0)
-  return bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  const bytes = Number(value || 0);
+  return bytes < 1024 * 1024
+    ? `${Math.max(1, Math.round(bytes / 1024))} KB`
+    : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 </script>
 
@@ -297,6 +493,32 @@ function formatBytes(value) {
   color: var(--color-ink-muted);
 }
 
+.accent-review-section {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.accent-review-section p {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.accent-swatch {
+  width: 10px;
+  height: 10px;
+  display: inline-block;
+  margin-inline-end: 7px;
+  border-radius: 50%;
+}
+
+.swatch-blue {
+  background: var(--accent-blue-preview);
+}
+.swatch-emerald {
+  background: var(--accent-emerald-preview);
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -312,7 +534,7 @@ function formatBytes(value) {
 .type-control {
   min-width: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(165px, .42fr);
+  grid-template-columns: minmax(0, 1fr) minmax(165px, 0.42fr);
   gap: 20px;
   padding: 20px;
   border: 1px solid var(--color-hairline);
@@ -390,7 +612,7 @@ function formatBytes(value) {
 .weight-toggle small {
   font-size: 11px;
   font-variant-numeric: tabular-nums;
-  opacity: .78;
+  opacity: 0.78;
 }
 
 .type-sample {
@@ -437,10 +659,10 @@ function formatBytes(value) {
   align-items: center;
   gap: 10px;
   padding: 14px;
-  color: var(--color-warning);
-  border: 1px solid var(--color-warning-border);
+  color: var(--link);
+  border: 1px solid var(--color-primary);
   border-radius: var(--radius-field);
-  background: var(--color-warning-bg);
+  background: var(--info-border);
 }
 
 .backup-result {
@@ -476,6 +698,10 @@ function formatBytes(value) {
 }
 
 @media (max-width: 700px) {
+  .accent-review-section {
+    grid-template-columns: 1fr;
+  }
+
   .type-control {
     grid-template-columns: 1fr;
   }

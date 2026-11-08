@@ -2,6 +2,8 @@ import { defineStore } from 'pinia'
 import { configureApiBaseUrl } from '@/api/client'
 import { desktopErrorMessage, invokeDesktop, isDesktopRuntime } from '@/desktop/bridge'
 
+let initializationPromise = null
+
 export const useDesktopStore = defineStore('desktop', {
   state: () => ({
     initialized: false,
@@ -28,27 +30,32 @@ export const useDesktopStore = defineStore('desktop', {
     },
     async initialize(force = false) {
       if (this.initialized && !force) return this.runtime
+      if (initializationPromise) return initializationPromise
       if (!isDesktopRuntime()) {
         this.applyRuntime({ desktop: false, ready: true, activated: true, api_base_url: '/api/v1', error: null })
         this.initialized = true
         return this.runtime
       }
       this.loading = true
-      try {
-        this.applyRuntime(await invokeDesktop('get_runtime_info'))
-        this.initialized = true
-        return this.runtime
-      } catch (cause) {
-        this.applyRuntime({
-          desktop: true,
-          ready: false,
-          error: desktopErrorMessage(cause, 'تعذر قراءة حالة الخدمات المحلية.'),
-        })
-        this.initialized = true
-        return this.runtime
-      } finally {
-        this.loading = false
-      }
+      initializationPromise = (async () => {
+        try {
+          this.applyRuntime(await invokeDesktop('get_runtime_info'))
+          this.initialized = true
+          return this.runtime
+        } catch (cause) {
+          this.applyRuntime({
+            desktop: true,
+            ready: false,
+            error: desktopErrorMessage(cause, 'تعذر قراءة حالة الخدمات المحلية.'),
+          })
+          this.initialized = true
+          return this.runtime
+        } finally {
+          this.loading = false
+          initializationPromise = null
+        }
+      })()
+      return initializationPromise
     },
     async activateNew(request) {
       this.loading = true

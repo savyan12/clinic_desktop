@@ -1,32 +1,34 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useDesktopStore } from '@/stores/desktop'
+import { useStartupStore } from '@/stores/startup'
 import AppLayout from '@/layouts/AppLayout.vue'
 import AuthLayout from '@/layouts/AuthLayout.vue'
 import PrintLayout from '@/layouts/PrintLayout.vue'
-import ActivationView from '@/views/activation/ActivationView.vue'
-import AuditLogView from '@/views/audit/AuditLogView.vue'
-import LoginView from '@/views/auth/LoginView.vue'
-import DashboardView from '@/views/dashboard/DashboardView.vue'
-import DoctorDetailsView from '@/views/doctors/DoctorDetailsView.vue'
-import DoctorsView from '@/views/doctors/DoctorsView.vue'
-import ExpensesView from '@/views/expenses/ExpensesView.vue'
-import PatientDetailsView from '@/views/patients/PatientDetailsView.vue'
-import PatientsView from '@/views/patients/PatientsView.vue'
-import PatientStatementPrintView from '@/views/print/PatientStatementPrintView.vue'
-import ReportPrintView from '@/views/print/ReportPrintView.vue'
-import SessionPrintView from '@/views/print/SessionPrintView.vue'
-import SponsorStatementPrintView from '@/views/print/SponsorStatementPrintView.vue'
-import ReportsView from '@/views/reports/ReportsView.vue'
-import ServicesView from '@/views/services/ServicesView.vue'
-import SessionDetailsView from '@/views/sessions/SessionDetailsView.vue'
-import SessionsView from '@/views/sessions/SessionsView.vue'
-import SettingsView from '@/views/settings/SettingsView.vue'
-import SponsorDetailsView from '@/views/sponsors/SponsorDetailsView.vue'
-import SponsorsView from '@/views/sponsors/SponsorsView.vue'
-import SubscriptionDetailsView from '@/views/subscriptions/SubscriptionDetailsView.vue'
-import SubscriptionsView from '@/views/subscriptions/SubscriptionsView.vue'
-import UsersView from '@/views/users/UsersView.vue'
+
+const ActivationView = () => import('@/views/activation/ActivationView.vue')
+const AuditLogView = () => import('@/views/audit/AuditLogView.vue')
+const LoginView = () => import('@/views/auth/LoginView.vue')
+const DashboardView = () => import('@/views/dashboard/DashboardView.vue')
+const DoctorDetailsView = () => import('@/views/doctors/DoctorDetailsView.vue')
+const DoctorsView = () => import('@/views/doctors/DoctorsView.vue')
+const ExpensesView = () => import('@/views/expenses/ExpensesView.vue')
+const PatientDetailsView = () => import('@/views/patients/PatientDetailsView.vue')
+const PatientsView = () => import('@/views/patients/PatientsView.vue')
+const PatientStatementPrintView = () => import('@/views/print/PatientStatementPrintView.vue')
+const ReportPrintView = () => import('@/views/print/ReportPrintView.vue')
+const SessionPrintView = () => import('@/views/print/SessionPrintView.vue')
+const SponsorStatementPrintView = () => import('@/views/print/SponsorStatementPrintView.vue')
+const ReportsView = () => import('@/views/reports/ReportsView.vue')
+const ServicesView = () => import('@/views/services/ServicesView.vue')
+const SessionDetailsView = () => import('@/views/sessions/SessionDetailsView.vue')
+const SessionsView = () => import('@/views/sessions/SessionsView.vue')
+const SettingsView = () => import('@/views/settings/SettingsView.vue')
+const SponsorDetailsView = () => import('@/views/sponsors/SponsorDetailsView.vue')
+const SponsorsView = () => import('@/views/sponsors/SponsorsView.vue')
+const SubscriptionDetailsView = () => import('@/views/subscriptions/SubscriptionDetailsView.vue')
+const SubscriptionsView = () => import('@/views/subscriptions/SubscriptionsView.vue')
+const UsersView = () => import('@/views/users/UsersView.vue')
 
 const roles = ['admin', 'receptionist']
 
@@ -86,8 +88,9 @@ const router = createRouter({
 })
 
 router.beforeEach(async (to) => {
+  const startup = useStartupStore()
+  if (!await startup.initialize()) return false
   const desktop = useDesktopStore()
-  await desktop.initialize()
   if (desktop.isDesktop && (!desktop.activated || !desktop.ready)) {
     if (to.name !== 'activation') return { name: 'activation' }
     return true

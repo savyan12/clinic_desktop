@@ -1,0 +1,14 @@
+/* Alternative accent: Nexus-style emerald.
+   Use INSTEAD of the blue --accent* block in tokens.css (override after it).
+   Note: Nexus's own button green (#0AB980) is only 2.54:1 with white text, so it is
+   NOT used for buttons/text here. Darker #087F5B gives 5.0:1.
+   If you pick emerald, success semantic must move away from green to avoid clashing:
+   keep --success-* as is but never use it on controls, only on chips. */
+:root {
+  --accent: #087F5B;        /* white on it = 5.00:1 */
+  --accent-hover: #067350;  /* 5.87:1 */
+  --accent-tint: #E8FFF9;   /* nav active, icon chips (sampled from Nexus) */
+  --accent-ring: rgba(8, 127, 91, 0.20);
+  --info-bg: #EAF1FE;       /* info stays blue so it never reads as success */
+  --info-fg: #1A62E0;
+}

@@ -83,15 +83,15 @@ async function save() {
 </script>
 
 <style scoped>
-.dialog-title { padding: 24px 24px 4px; font-size: 22px; font-weight: 600; }
+.dialog-title { padding: 24px 24px 4px; font-size: var(--font-section-size); font-weight: 600; }
 .dialog-content { display: grid; gap: 18px; padding: 12px 24px !important; }
 .dialog-content > p { margin: 0; color: var(--color-ink-muted); }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-.allocation-table { overflow: hidden; border: 1px solid var(--color-hairline); border-radius: 14px; }
+.allocation-table { overflow: hidden; border: 1px solid var(--color-hairline); border-radius: var(--radius-lg); }
 .allocation-head, .allocation-row { display: grid; grid-template-columns: minmax(180px, 1fr) 130px 180px; align-items: center; gap: 12px; padding: 12px 16px; }
 .allocation-head { color: var(--color-ink-muted); background: var(--color-parchment); font-size: 13px; font-weight: 600; }
 .allocation-row { border-top: 1px solid var(--color-hairline); }
-.allocation-summary { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; padding: 14px 16px; border-radius: 12px; background: var(--color-pearl); }
+.allocation-summary { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; padding: 14px 16px; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-subtle); }
 .allocation-summary span { display: flex; gap: 6px; }
 .allocation-summary .warning { color: var(--color-danger); }
 .field-error { color: var(--color-danger); font-size: 13px; }

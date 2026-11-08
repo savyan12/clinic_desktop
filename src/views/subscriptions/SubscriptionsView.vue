@@ -7,9 +7,9 @@
     </div>
     <DataTableCard :headers="headers" :items="subscriptions" :loading="loading" :error="error" :meta="meta" :empty="{ icon: 'mdi-wallet-membership', title: 'لا توجد اشتراكات مطابقة', description: 'غيّر البحث أو الفلاتر، أو أنشئ اشتراكًا جديدًا.', actionLabel: 'إضافة اشتراك' }" @retry="load" @page="changePage" @empty-action="dialog = true">
       <template #rows="{ items }">
-        <tr v-for="item in items" :key="item.id" class="clickable-row" @click="router.push(`/subscriptions/${item.id}`)">
+        <tr v-for="item in items" :key="item.id">
           <td><strong>{{ item.patient.name }}</strong><span class="cell-subtitle phone-value">{{ item.patient.phone }}</span></td>
-          <td><strong>{{ item.name }}</strong><span class="cell-subtitle">{{ item.services.map((service) => service.name).join('، ') }}</span></td>
+          <td><router-link class="record-link" :to="`/subscriptions/${item.id}`">{{ item.name }}</router-link><span class="cell-subtitle">{{ item.services.map((service) => service.name).join('، ') }}</span></td>
           <td><strong>{{ item.remaining }} متبقية</strong><span class="cell-subtitle">{{ item.sessions_used }} من {{ item.sessions_count }} جلسة</span></td>
           <td>{{ formatDate(item.start_date) }}</td>
           <td><MoneyText :value="item.total_price" /></td><td><MoneyText :value="item.received_amount" /></td><td><MoneyText :value="item.outstanding_amount" /></td>
@@ -24,7 +24,6 @@
 
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
 import { listSubscriptions } from '@/api/subscriptions'
 import DataTableCard from '@/components/common/DataTableCard.vue'
 import MoneyText from '@/components/common/MoneyText.vue'
@@ -33,11 +32,11 @@ import StatusChip from '@/components/common/StatusChip.vue'
 import CreateSubscriptionDialog from '@/components/subscriptions/CreateSubscriptionDialog.vue'
 import { useDebounce } from '@/composables/useDebounce'
 
-const router = useRouter(); const debounce = useDebounce()
+const debounce = useDebounce()
 const subscriptions = ref([]); const meta = ref(null); const loading = ref(true); const error = ref(''); const dialog = ref(false)
 const filters = reactive({ search: '', status: null, page: 1, per_page: 15 })
 const statusItems = [{ title: 'نشط', value: 'active' }, { title: 'مكتمل', value: 'completed' }, { title: 'ملغي', value: 'cancelled' }]
-const headers = [{ title: 'المريض', key: 'patient' }, { title: 'الاشتراك', key: 'subscription' }, { title: 'الجلسات', key: 'sessions' }, { title: 'البداية', key: 'start' }, { title: 'القيمة', key: 'value' }, { title: 'المحصل', key: 'paid' }, { title: 'المستحق', key: 'amount' }, { title: 'الحالة', key: 'status' }, { title: '', key: 'actions' }]
+const headers = [{ title: 'المريض', key: 'patient' }, { title: 'الاشتراك', key: 'subscription' }, { title: 'الجلسات', key: 'sessions' }, { title: 'البداية', key: 'start' }, { title: 'القيمة', key: 'value' }, { title: 'المحصل', key: 'paid' }, { title: 'المستحق', key: 'amount' }, { title: 'الحالة', key: 'status' }, { title: 'الإجراءات', key: 'actions' }]
 onMounted(load)
 async function load() { loading.value = true; error.value = ''; try { const response = await listSubscriptions(filters); subscriptions.value = response.data; meta.value = response.meta } catch (apiError) { error.value = apiError.message } finally { loading.value = false } }
 function searchChanged() { filters.page = 1; debounce(load) }
