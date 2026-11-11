@@ -8,6 +8,7 @@ use crate::{
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use bcrypt::{hash, DEFAULT_COST};
 use sha2::{Digest, Sha256};
+use sqlx::MySqlPool;
 use std::fs::{self, File, OpenOptions};
 use std::future::Future;
 use std::io::{Read, Write};
@@ -26,6 +27,9 @@ use std::os::windows::process::CommandExt;
 
 const CONFIG_FORMAT_VERSION: u32 = 1;
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(45);
+const MYSQL_STARTUP_TIMEOUT: Duration = Duration::from_secs(120);
+const DATABASE_OPERATION_TIMEOUT: Duration = Duration::from_secs(180);
+const ACTIVATION_DEADLOCK_RETRIES: usize = 2;
 
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -281,68 +285,109 @@ fn activate_new_database(
 
     run_async_operation(
         async move {
-            let pool = api::db::connect(&config).await?;
-            let users_table_exists = sqlx::query_scalar::<_, i64>(
-                "SELECT COUNT(*) FROM information_schema.tables \
-                 WHERE table_schema = DATABASE() AND table_name = 'users'",
-            )
-            .fetch_one(&pool)
-            .await
-            .map_err(|error| format!("تعذر فحص قاعدة بيانات التفعيل: {error}"))?
-                > 0;
-            if users_table_exists {
-                let users_count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users")
-                    .fetch_one(&pool)
-                    .await
-                    .map_err(|error| format!("تعذر فحص مستخدمي النظام: {error}"))?;
-                if users_count > 0 {
-                    return Err(
-                        "قاعدة البيانات المحلية تحتوي على مستخدمين ولا يمكن تهيئتها كتثبيت جديد."
-                            .to_string(),
-                    );
+            let mut last_deadlock = None;
+            for attempt in 0..=ACTIVATION_DEADLOCK_RETRIES {
+                let pool = api::db::connect(&config).await?;
+                let result = activate_new_database_attempt(
+                    &pool,
+                    clinic_name.clone(),
+                    clinic_subtitle.clone(),
+                    admin_name.clone(),
+                    admin_username.clone(),
+                    password_hash.clone(),
+                )
+                .await;
+                pool.close().await;
+
+                match result {
+                    Err(error)
+                        if is_mysql_deadlock(&error) && attempt < ACTIVATION_DEADLOCK_RETRIES =>
+                    {
+                        last_deadlock = Some(error);
+                        tokio::time::sleep(Duration::from_millis(250 * (attempt as u64 + 1))).await;
+                    }
+                    result => return result,
                 }
             }
 
-            api::schema::reset(&pool).await?;
-            let mut transaction = pool
-                .begin()
-                .await
-                .map_err(|error| format!("تعذر بدء معاملة التفعيل: {error}"))?;
-            let admin_id = sqlx::query(
-                "INSERT INTO users \
-                 (name, username, password, role, is_active, created_at, updated_at) \
-                 VALUES (?, ?, ?, 'admin', 1, NOW(), NOW())",
-            )
-            .bind(admin_name)
-            .bind(admin_username)
-            .bind(password_hash)
-            .execute(&mut *transaction)
-            .await
-            .map_err(|error| format!("تعذر إنشاء حساب المدير: {error}"))?
-            .last_insert_id();
-            sqlx::query(
-                "INSERT INTO settings \
-                 (clinic_name, clinic_subtitle, currency, print_size, show_logo, \
-                  body_font_size, body_font_weight, table_font_size, table_font_weight, \
-                  heading_font_size, heading_font_weight, section_font_size, \
-                  section_font_weight, updated_by, created_at, updated_at) \
-                 VALUES (?, ?, 'د.ل', 'A4', 1, 16, 400, 15, 400, 32, 600, 22, 600, ?, NOW(), NOW())",
-            )
-            .bind(clinic_name)
-            .bind(clinic_subtitle)
-            .bind(admin_id)
-            .execute(&mut *transaction)
-            .await
-            .map_err(|error| format!("تعذر حفظ إعدادات العيادة: {error}"))?;
-            transaction
-                .commit()
-                .await
-                .map_err(|error| format!("تعذر اعتماد تفعيل النظام: {error}"))?;
-            pool.close().await;
-            Ok(())
+            Err(last_deadlock
+                .unwrap_or_else(|| "تعذر تهيئة قاعدة بيانات العيادة بعد عدة محاولات.".to_string()))
         },
         "انتهت مهلة تهيئة قاعدة بيانات العيادة.",
     )
+}
+
+async fn activate_new_database_attempt(
+    pool: &MySqlPool,
+    clinic_name: String,
+    clinic_subtitle: Option<String>,
+    admin_name: String,
+    admin_username: String,
+    password_hash: String,
+) -> Result<(), String> {
+    let users_table_exists = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM information_schema.tables \
+         WHERE table_schema = DATABASE() AND table_name = 'users'",
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|error| format!("تعذر فحص قاعدة بيانات التفعيل: {error}"))?
+        > 0;
+    if users_table_exists {
+        let users_count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users")
+            .fetch_one(pool)
+            .await
+            .map_err(|error| format!("تعذر فحص مستخدمي النظام: {error}"))?;
+        if users_count > 0 {
+            return Err(
+                "قاعدة البيانات المحلية تحتوي على مستخدمين ولا يمكن تهيئتها كتثبيت جديد."
+                    .to_string(),
+            );
+        }
+    }
+
+    api::schema::reset(pool).await?;
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|error| format!("تعذر بدء معاملة التفعيل: {error}"))?;
+    let admin_id = sqlx::query(
+        "INSERT INTO users \
+         (name, username, password, role, is_active, created_at, updated_at) \
+         VALUES (?, ?, ?, 'admin', 1, NOW(), NOW())",
+    )
+    .bind(admin_name)
+    .bind(admin_username)
+    .bind(password_hash)
+    .execute(&mut *transaction)
+    .await
+    .map_err(|error| format!("تعذر إنشاء حساب المدير: {error}"))?
+    .last_insert_id();
+    sqlx::query(
+        "INSERT INTO settings \
+         (clinic_name, clinic_subtitle, currency, print_size, show_logo, \
+          body_font_size, body_font_weight, table_font_size, table_font_weight, \
+          heading_font_size, heading_font_weight, section_font_size, \
+          section_font_weight, updated_by, created_at, updated_at) \
+         VALUES (?, ?, 'د.ل', 'A4', 1, 16, 400, 15, 400, 32, 600, 22, 600, ?, NOW(), NOW())",
+    )
+    .bind(clinic_name)
+    .bind(clinic_subtitle)
+    .bind(admin_id)
+    .execute(&mut *transaction)
+    .await
+    .map_err(|error| format!("تعذر حفظ إعدادات العيادة: {error}"))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| format!("تعذر اعتماد تفعيل النظام: {error}"))?;
+    Ok(())
+}
+
+fn is_mysql_deadlock(error: &str) -> bool {
+    error.contains("1213")
+        || error.contains("ER_LOCK_DEADLOCK")
+        || error.contains("Deadlock found when trying to get lock")
 }
 
 pub fn migrate_database(
@@ -390,12 +435,35 @@ where
     F: Future<Output = Result<T, String>> + Send + 'static,
 {
     let (sender, receiver) = mpsc::sync_channel(1);
-    tauri::async_runtime::spawn(async move {
+    let task = tauri::async_runtime::spawn(async move {
         let _ = sender.send(future.await);
     });
-    receiver
-        .recv_timeout(STARTUP_TIMEOUT)
-        .map_err(|_| timeout_message.to_string())?
+
+    match receiver.recv_timeout(DATABASE_OPERATION_TIMEOUT) {
+        Ok(result) => result,
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            if task.inner().is_finished() {
+                if let Ok(result) = receiver.try_recv() {
+                    return result;
+                }
+            }
+
+            task.abort();
+            while !task.inner().is_finished() {
+                thread::sleep(Duration::from_millis(10));
+            }
+
+            match receiver.try_recv() {
+                Ok(result) => result,
+                Err(_) => Err(format!(
+                    "{timeout_message} أوقفنا المحاولة السابقة قبل السماح بإعادة المحاولة."
+                )),
+            }
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            Err("توقفت عملية قاعدة البيانات قبل إكمالها.".to_string())
+        }
+    }
 }
 
 pub fn mark_activated_and_start_api(state: &DesktopState) -> Result<RuntimeInfo, String> {
@@ -541,7 +609,7 @@ pub fn start_rust_api(state: &DesktopState) -> Result<(), String> {
         inner.last_error = None;
     }
 
-    match startup_receiver.recv_timeout(STARTUP_TIMEOUT) {
+    match startup_receiver.recv_timeout(DATABASE_OPERATION_TIMEOUT) {
         Ok(Ok(())) => {}
         Ok(Err(error)) => {
             let _ = stop_rust_api(state);
@@ -589,6 +657,9 @@ pub fn stop_rust_api(state: &DesktopState) -> Result<(), String> {
         }
         if !task.inner().is_finished() {
             task.abort();
+            while !task.inner().is_finished() {
+                thread::sleep(Duration::from_millis(10));
+            }
         }
     }
 
@@ -1000,7 +1071,7 @@ fn ensure_application_database(context: &RuntimeContext) -> Result<(), String> {
 }
 
 fn wait_for_mysql_port(state: &DesktopState, port: u16) -> Result<(), String> {
-    let deadline = Instant::now() + STARTUP_TIMEOUT;
+    let deadline = Instant::now() + MYSQL_STARTUP_TIMEOUT;
     while Instant::now() < deadline {
         if TcpStream::connect_timeout(
             &SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port),

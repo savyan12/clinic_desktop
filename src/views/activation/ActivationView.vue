@@ -79,12 +79,23 @@
               dir="ltr"
             />
           </div>
+          <v-alert
+            v-if="desktop.loading"
+            type="info"
+            variant="tonal"
+            density="compact"
+            role="status"
+            class="activation-wait-note"
+          >
+            قد تستغرق التهيئة الأولى حتى 3 دقائق على بعض الأجهزة. اترك التطبيق مفتوحاً؛ لا تضغط الزر مرة أخرى.
+          </v-alert>
           <div class="activation-actions">
             <v-btn
               color="primary"
               prepend-icon="mdi-check-circle-outline"
               data-form-flow-primary
               :loading="desktop.loading"
+              :disabled="desktop.loading"
               @click="activateNew"
             >إنشاء وتفعيل النظام</v-btn>
           </div>
