@@ -127,7 +127,7 @@ pub async fn show(
     .fetch_all(&state.pool)
     .await?;
     let sessions = sqlx::query_as::<_, SessionRow>(
-        "SELECT * FROM sessions WHERE subscription_id = ? ORDER BY opened_at DESC, id DESC",
+        "SELECT * FROM sessions WHERE subscription_id = ? AND status <> 'cancelled' ORDER BY opened_at DESC, id DESC",
     )
     .bind(id)
     .fetch_all(&state.pool)

@@ -1878,7 +1878,7 @@ fn columns(report_type: &str) -> ApiResult<Vec<ExportColumn>> {
             column("patient", "المريض", 24.0, 1.3),
             column("doctor", "الطبيب", 21.0, 1.15),
             column("services", "الخدمات", 38.0, 1.9),
-            column("net_total", "القيمة", 16.0, 1.05),
+            column("collected_amount", "المحصل", 16.0, 1.05),
             column("status", "الحالة", 13.0, 0.9),
         ],
         "collections" => vec![
@@ -2127,7 +2127,7 @@ fn heading_label<'a>(report_type: &str, key: &'a str) -> &'a str {
         ("subscriptions", "completed_sessions") => "الجلسات المكتملة خلال الفترة",
         ("subscriptions", "total_value") => "إجمالي قيمة الاشتراكات",
         ("expenses", "count") => "عدد العمليات",
-        (_, "service_value") => "قيمة الخدمات",
+        (_, "service_value") => "إجمالي المحصل من الجلسات",
         (_, "received") => "إجمالي المقبوضات",
         (_, "refunds") => "إجمالي الاسترجاعات",
         (_, "net") => "صافي المقبوضات",
@@ -2185,6 +2185,7 @@ fn is_money_key(key: &str) -> bool {
             | "paid"
             | "remaining"
             | "earned"
+            | "collected_amount"
             | "net_total"
             | "amount"
             | "paid_amount"
@@ -2326,7 +2327,7 @@ mod tests {
                 "patient": { "name": "مريض عربي" },
                 "doctor": { "name": "طبيب عربي" },
                 "services": [{ "name": "علاج يدوي" }],
-                "net_total": "80.000",
+                "collected_amount": "80.000",
                 "status": "closed"
             }],
             "totals": { "count": 1, "service_value": "80.000" },
@@ -2351,7 +2352,7 @@ mod tests {
                         { "name": "علاج يدوي وتأهيل حركي" },
                         { "name": if index % 3 == 0 { "تمارين علاجية طويلة للاختبار" } else { "جلسة متابعة" } }
                     ],
-                    "net_total": format!("{}.500", index * 10),
+                    "collected_amount": format!("{}.500", index * 10),
                     "status": if index % 5 == 0 { "cancelled" } else { "closed" }
                 })
             })
@@ -2515,7 +2516,7 @@ mod tests {
         let expectations = [
             (
                 "sessions",
-                vec!["التاريخ", "المريض", "الطبيب", "الخدمات", "القيمة", "الحالة"],
+                vec!["التاريخ", "المريض", "الطبيب", "الخدمات", "المحصل", "الحالة"],
             ),
             (
                 "collections",

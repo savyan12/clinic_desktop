@@ -51,7 +51,7 @@ const loading = ref(true)
 const error = ref('')
 const sessionDialog = ref(false)
 const filters = reactive({ search: '', doctor_id: null, status: null, date: '', page: 1, per_page: 15 })
-const statusItems = [{ title: 'مفتوحة', value: 'open' }, { title: 'مغلقة', value: 'closed' }, { title: 'ملغاة', value: 'cancelled' }]
+const statusItems = [{ title: 'مفتوحة', value: 'open' }, { title: 'مغلقة', value: 'closed' }]
 const headers = [
   { title: 'رقم الجلسة', key: 'code' }, { title: 'المريض', key: 'patient' }, { title: 'التاريخ والوقت', key: 'date' }, { title: 'الطبيب', key: 'doctor' },
   { title: 'الخدمات', key: 'services' }, { title: 'التغطية / الدفع', key: 'coverage' }, { title: 'الصافي', key: 'net' }, { title: 'الحالة', key: 'status' }, { title: 'الإجراءات', key: 'actions' },

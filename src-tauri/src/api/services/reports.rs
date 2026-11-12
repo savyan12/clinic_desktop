@@ -122,7 +122,8 @@ async fn sessions(state: &AppState, filters: &ReportFilters) -> ApiResult<Value>
     let status = filters.status.as_deref();
     let rows = sqlx::query_as::<_, SessionRow>(
         "SELECT * FROM sessions \
-         WHERE (? IS NULL OR DATE(opened_at) >= ?) \
+         WHERE status <> 'cancelled' \
+           AND (? IS NULL OR DATE(opened_at) >= ?) \
            AND (? IS NULL OR DATE(opened_at) <= ?) \
            AND (? IS NULL OR doctor_id = ?) \
            AND (? IS NULL OR patient_id = ?) \
@@ -144,9 +145,12 @@ async fn sessions(state: &AppState, filters: &ReportFilters) -> ApiResult<Value>
     let mut values = Vec::with_capacity(rows.len());
     let mut service_value = Decimal::ZERO;
     for session in &rows {
-        if session.status == "closed" && session.r#type == "individual" {
-            service_value += session.net_total;
-        }
+        let collected_amount = if session.status == "closed" && session.r#type == "individual" {
+            money::round(session.wallet_amount + session.paid_amount)
+        } else {
+            Decimal::ZERO
+        };
+        service_value += collected_amount;
         let patient = patient(state, session.patient_id).await?;
         let doctor = doctor(state, session.doctor_id).await?;
         let services = session_services(state, session.id).await?;
@@ -167,6 +171,7 @@ async fn sessions(state: &AppState, filters: &ReportFilters) -> ApiResult<Value>
             "opened_at": time::iso(session.opened_at),
             "closed_at": session.closed_at.map(time::iso),
             "net_total": money::normalize(session.net_total),
+            "collected_amount": money::normalize(collected_amount),
         }));
     }
     Ok(json!({
@@ -326,10 +331,11 @@ async fn doctor_dues(state: &AppState, filters: &ReportFilters) -> ApiResult<Val
     let mut total_paid = Decimal::ZERO;
     for doctor in &doctors {
         let sessions_count = sqlx::query_scalar::<_, u64>(
-            "SELECT CAST(COUNT(*) AS UNSIGNED) FROM sessions \
+            "SELECT CAST(COUNT(*) AS UNSIGNED) FROM sessions s \
              WHERE doctor_id = ? AND type = 'individual' AND status = 'closed' AND commission_amount IS NOT NULL \
                AND (? IS NULL OR DATE(closed_at) >= ?) \
-               AND (? IS NULL OR DATE(closed_at) <= ?)",
+               AND (? IS NULL OR DATE(closed_at) <= ?) \
+               AND CASE WHEN s.net_total <= 0 THEN 0 ELSE ROUND(s.commission_amount * GREATEST(s.net_total - COALESCE((SELECT SUM(d.amount - d.paid_amount) FROM debts d WHERE d.session_id = s.id AND d.status <> 'void'), 0), 0) / s.net_total, 3) END > 0",
         )
         .bind(doctor.id)
         .bind(filters.from)
@@ -338,20 +344,13 @@ async fn doctor_dues(state: &AppState, filters: &ReportFilters) -> ApiResult<Val
         .bind(filters.to)
         .fetch_one(&state.pool)
         .await?;
-        let earned = sqlx::query_scalar::<_, Option<Decimal>>(
-            "SELECT SUM(commission_amount) FROM sessions \
-             WHERE doctor_id = ? AND type = 'individual' AND status = 'closed' AND commission_amount IS NOT NULL \
-               AND (? IS NULL OR DATE(closed_at) >= ?) \
-               AND (? IS NULL OR DATE(closed_at) <= ?)",
+        let earned = super::commissions::doctor_earned_pool(
+            &state.pool,
+            doctor.id,
+            filters.from,
+            filters.to,
         )
-        .bind(doctor.id)
-        .bind(filters.from)
-        .bind(filters.from)
-        .bind(filters.to)
-        .bind(filters.to)
-        .fetch_one(&state.pool)
-        .await?
-        .unwrap_or(Decimal::ZERO);
+        .await?;
         let paid = sqlx::query_scalar::<_, Option<Decimal>>(
             "SELECT SUM(amount) FROM doctor_payouts \
              WHERE doctor_id = ? \
@@ -401,7 +400,7 @@ async fn subscriptions(state: &AppState, filters: &ReportFilters) -> ApiResult<V
                SELECT 1 FROM sessions supervised \
                WHERE supervised.subscription_id = sub.id \
                  AND supervised.type = 'subscription' \
-                 AND supervised.status IN ('closed','cancelled') \
+                 AND supervised.status = 'closed' \
                  AND supervised.doctor_id = ? \
                  AND (? IS NULL OR DATE(supervised.opened_at) >= ?) \
                  AND (? IS NULL OR DATE(supervised.opened_at) <= ?) \
@@ -503,7 +502,7 @@ async fn subscription_supervised_sessions(
 ) -> ApiResult<Vec<Value>> {
     let sessions = sqlx::query_as::<_, SessionRow>(
         "SELECT * FROM sessions \
-         WHERE subscription_id = ? AND type = 'subscription' AND status IN ('closed','cancelled') \
+         WHERE subscription_id = ? AND type = 'subscription' AND status = 'closed' \
            AND (? IS NULL OR DATE(opened_at) >= ?) \
            AND (? IS NULL OR DATE(opened_at) <= ?) \
            AND (? IS NULL OR doctor_id = ?) \

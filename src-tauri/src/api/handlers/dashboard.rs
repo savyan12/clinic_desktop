@@ -26,19 +26,19 @@ pub async fn show(
 ) -> ApiResult<Json<Value>> {
     let date = query.date.unwrap_or_else(time::today);
     let sessions_count = sqlx::query_scalar::<_, u64>(
-        "SELECT CAST(COUNT(*) AS UNSIGNED) FROM sessions WHERE DATE(opened_at) = ?",
+        "SELECT CAST(COUNT(*) AS UNSIGNED) FROM sessions WHERE DATE(opened_at) = ? AND status <> 'cancelled'",
     )
     .bind(date)
     .fetch_one(&state.pool)
     .await?;
     let patients_count = sqlx::query_scalar::<_, u64>(
-        "SELECT CAST(COUNT(DISTINCT patient_id) AS UNSIGNED) FROM sessions WHERE DATE(opened_at) = ?",
+        "SELECT CAST(COUNT(DISTINCT patient_id) AS UNSIGNED) FROM sessions WHERE DATE(opened_at) = ? AND status <> 'cancelled'",
     )
     .bind(date)
     .fetch_one(&state.pool)
     .await?;
     let today_sessions = sqlx::query_as::<_, SessionRow>(
-        "SELECT * FROM sessions WHERE DATE(opened_at) = ? ORDER BY opened_at DESC, id DESC",
+        "SELECT * FROM sessions WHERE DATE(opened_at) = ? AND status <> 'cancelled' ORDER BY opened_at DESC, id DESC",
     )
     .bind(date)
     .fetch_all(&state.pool)
@@ -97,7 +97,7 @@ pub async fn show(
 
     let service_value = scalar_decimal(
         &state,
-        "SELECT SUM(net_total) FROM sessions WHERE DATE(opened_at) = ? AND status = 'closed' AND type = 'individual'",
+        "SELECT SUM(wallet_amount + paid_amount) FROM sessions WHERE DATE(opened_at) = ? AND status = 'closed' AND type = 'individual'",
         Some(date),
     )
     .await?;
@@ -113,17 +113,12 @@ pub async fn show(
         None,
     )
     .await?;
-    let doctor_earned = scalar_decimal(
-        &state,
-        "SELECT SUM(commission_amount) FROM sessions WHERE type = 'individual' AND status = 'closed' AND commission_amount IS NOT NULL",
-        None,
-    )
-    .await?;
+    let doctor_earned = crate::api::services::commissions::total_earned_pool(&state.pool).await?;
     let doctor_paid =
         scalar_decimal(&state, "SELECT SUM(amount) FROM doctor_payouts", None).await?;
     let doctor_remaining = doctor_earned - doctor_paid;
     stats.extend([
-        json!({ "key": "service_value_today", "label": "قيمة جلسات اليوم", "value": money::normalize(service_value), "money": true, "to": format!("/reports/sessions?from={date_text}&to={date_text}") }),
+        json!({ "key": "service_value_today", "label": "محصّل جلسات اليوم", "value": money::normalize(service_value), "money": true, "caption": "المدفوع والرصيد المستخدم فقط", "to": format!("/reports/sessions?from={date_text}&to={date_text}") }),
         json!({ "key": "collections_today", "label": "المقبوضات اليوم", "value": money::normalize(collections), "money": true, "to": format!("/reports/collections?from={date_text}&to={date_text}") }),
         json!({ "key": "debts_remaining", "label": "إجمالي الديون", "value": money::normalize(debts_remaining), "money": true, "to": "/reports/debts" }),
         json!({ "key": "near_subscriptions", "label": "الاشتراكات القريبة من الاكتمال", "value": near_subscriptions.len(), "money": false, "to": "/subscriptions" }),

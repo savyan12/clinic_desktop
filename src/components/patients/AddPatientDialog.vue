@@ -1,9 +1,9 @@
 <template>
   <v-dialog :model-value="modelValue" persistent max-width="720" @update:model-value="$emit('update:modelValue', $event)">
     <v-card>
-      <v-card-title class="dialog-heading">إضافة مريض جديد</v-card-title>
+      <v-card-title class="dialog-heading">{{ dialogTitle }}</v-card-title>
       <v-card-text class="dialog-body">
-        <p class="dialog-intro">الاسم ورقم الهاتف فقط إلزاميان، وبقية البيانات اختيارية.</p>
+        <p class="dialog-intro">{{ dialogIntro }}</p>
         <InlineError v-if="error" :message="error" />
         <InlineError v-if="optionsError" :message="optionsError" retry @retry="loadOptions" />
         <div v-if="duplicateWarning" class="duplicate-warning">
@@ -22,22 +22,25 @@
       </v-card-text>
       <v-card-actions class="dialog-actions">
         <v-btn variant="text" :disabled="saving" @click="close">إلغاء</v-btn>
-        <v-btn color="primary" data-form-flow-primary :loading="saving" @click="save">{{ duplicateWarning ? 'تأكيد الحفظ' : 'حفظ المريض' }}</v-btn>
+        <v-btn color="primary" data-form-flow-primary :loading="saving" @click="save">{{ duplicateWarning ? 'تأكيد الحفظ' : submitLabel }}</v-btn>
       </v-card-actions>
     </v-card>
   </v-dialog>
 </template>
 
 <script setup>
-import { reactive, ref, watch } from 'vue'
-import { createPatient } from '@/api/patients'
+import { computed, reactive, ref, watch } from 'vue'
+import { createPatient, updatePatient } from '@/api/patients'
 import { getSponsorOptions } from '@/api/sponsors'
 import { useDialogOptions } from '@/composables/useDialogOptions'
 import AppField from '@/components/common/AppField.vue'
 import InlineError from '@/components/common/InlineError.vue'
 import { useUiStore } from '@/stores/ui'
 
-const props = defineProps({ modelValue: Boolean })
+const props = defineProps({
+  modelValue: Boolean,
+  patient: { type: Object, default: null },
+})
 const emit = defineEmits(['update:modelValue', 'saved'])
 const ui = useUiStore()
 const { data: sponsors, loading: loadingOptions, error: optionsError, load: loadOptions } = useDialogOptions(() => props.modelValue, getSponsorOptions)
@@ -45,13 +48,26 @@ const saving = ref(false)
 const error = ref('')
 const errors = reactive({})
 const duplicateWarning = ref(false)
-const initialForm = () => ({ name: '', phone: '', age: null, gender: null, area: '', emergency_phone: '', sponsor_id: null, confirm_duplicate: false })
+const editMode = computed(() => Boolean(props.patient?.id))
+const dialogTitle = computed(() => editMode.value ? 'تعديل بيانات المريض' : 'إضافة مريض جديد')
+const dialogIntro = computed(() => editMode.value ? 'حدّث البيانات المطلوبة ثم احفظ التغييرات.' : 'الاسم ورقم الهاتف فقط إلزاميان، وبقية البيانات اختيارية.')
+const submitLabel = computed(() => editMode.value ? 'حفظ التعديلات' : 'حفظ المريض')
+const initialForm = (patient = null) => ({
+  name: patient?.name || '',
+  phone: patient?.phone || '',
+  age: patient?.age ?? null,
+  gender: patient?.gender ?? null,
+  area: patient?.area || '',
+  emergency_phone: patient?.emergency_phone || '',
+  sponsor_id: patient?.sponsor_id ?? patient?.sponsor?.id ?? null,
+  confirm_duplicate: false,
+})
 const form = reactive(initialForm())
 const genderItems = [{ title: 'ذكر', value: 'male' }, { title: 'أنثى', value: 'female' }]
 
-watch(() => props.modelValue, (open) => {
+watch([() => props.modelValue, () => props.patient], ([open]) => {
   if (!open) return
-  Object.assign(form, initialForm())
+  Object.assign(form, initialForm(props.patient))
   duplicateWarning.value = false
   error.value = ''
   clearErrors()
@@ -65,8 +81,13 @@ async function save() {
   error.value = ''
   clearErrors()
   try {
-    const response = await createPatient({ ...form, confirm_duplicate: duplicateWarning.value })
-    ui.showSnackbar(`تمت إضافة المريض ${response.data.name} بنجاح.`)
+    const payload = { ...form, confirm_duplicate: duplicateWarning.value }
+    const response = editMode.value
+      ? await updatePatient(props.patient.id, payload)
+      : await createPatient(payload)
+    ui.showSnackbar(editMode.value
+      ? 'تم تحديث بيانات المريض ' + response.data.name + ' بنجاح.'
+      : 'تمت إضافة المريض ' + response.data.name + ' بنجاح.')
     emit('saved', response.data)
     close()
   } catch (apiError) {

@@ -126,6 +126,23 @@ function refreshPatientDebtTotal(patientId) {
     .map((debt) => Math.max(0, Number(debt.amount) - Number(debt.paid_amount)))))
 }
 
+function doctorSummary(doctor) {
+  const sessions = db.sessions
+    .filter((session) => session.doctor_id === doctor.id && session.status === 'closed' && session.type === 'individual')
+  const hydrated = sessions.map(hydrateSession)
+  const deferred = sum(sessions.map((session, index) => Math.max(0, Number(session.commission_amount || 0) - Number(hydrated[index].commission_amount || 0))))
+  const fullyDeferred = hydrated.filter((session, index) => Number(sessions[index].commission_amount || 0) > 0 && Number(session.commission_amount || 0) === 0).length
+  const earned = Number(doctor.earned) - deferred
+  const paid = Number(doctor.paid)
+  return {
+    ...doctor,
+    sessions_count: Math.max(0, Number(doctor.sessions_count) - fullyDeferred),
+    earned: money(earned),
+    paid: money(paid),
+    remaining: money(earned - paid),
+  }
+}
+
 function dateTimeOn(date) {
   const now = new Date()
   const pad = (value) => String(value).padStart(2, '0')
@@ -135,12 +152,13 @@ function dateTimeOn(date) {
 function getDashboard(config) {
   const user = requireAuth(config)
   const today = isoDate()
-  const todaySessions = db.sessions.filter((item) => item.opened_at.startsWith(today))
+  const todaySessions = db.sessions.filter((item) => item.status !== 'cancelled' && item.opened_at.startsWith(today))
   const openSessions = db.sessions.filter((item) => item.status === 'open').map(hydrateSession)
   const nearSubscriptions = db.subscriptions.filter(isNearCompletion).map(hydrateSubscription)
   const patientsToday = new Set(todaySessions.map((item) => item.patient_id)).size
   const common = {
     open_sessions: openSessions,
+    today_sessions: todaySessions.map(hydrateSession),
     near_subscriptions: nearSubscriptions,
     shortcuts: [
       { label: 'المرضى', to: '/patients', icon: 'mdi-account-group-outline' },
@@ -168,16 +186,16 @@ function getDashboard(config) {
       stats: [
         { key: 'sessions_today', label: 'جلسات اليوم', value: todaySessions.length, caption: `${openSessions.length} مفتوحة`, to: `/reports/sessions?from=${today}&to=${today}` },
         { key: 'patients_today', label: 'المرضى الحاضرون', value: patientsToday, caption: 'مرضى فريدون', to: `/reports/sessions?from=${today}&to=${today}` },
-        { key: 'service_value_today', label: 'قيمة جلسات اليوم', value: money(sum(closedToday.filter((item) => item.type === 'individual').map((item) => item.net_total))), money: true, caption: 'قيمة خدمات مغلقة', to: `/reports/sessions?from=${today}&to=${today}` },
+        { key: 'service_value_today', label: 'محصّل جلسات اليوم', value: money(sum(closedToday.filter((item) => item.type === 'individual').map((item) => Number(item.settlement.wallet_amount) + Number(item.settlement.paid_amount)))), money: true, caption: 'المدفوع والرصيد المستخدم فقط', to: `/reports/sessions?from=${today}&to=${today}` },
         { key: 'collections_today', label: 'المقبوضات اليوم', value: money(collectedToday), money: true, caption: 'بعد الاسترجاعات', to: `/reports/collections?from=${today}&to=${today}` },
         { key: 'debts', label: 'إجمالي الديون', value: money(sum(db.debts.filter((item) => item.status !== 'void').map((item) => item.remaining))), money: true, caption: 'مبالغ لم تُحصّل', to: '/reports/debts?status=open' },
         { key: 'near_subscriptions', label: 'اشتراكات قريبة من الاكتمال', value: nearSubscriptions.length, caption: 'متبقي جلستان أو أقل', to: '/subscriptions' },
-        { key: 'doctor_dues', label: 'مستحقات الأطباء', value: money(sum(db.doctors.map((item) => item.remaining))), money: true, caption: 'غير مصروفة', to: '/reports/doctor-dues' },
+        { key: 'doctor_dues', label: 'مستحقات الأطباء', value: money(sum(db.doctors.map((item) => doctorSummary(item).remaining))), money: true, caption: 'غير مصروفة', to: '/reports/doctor-dues' },
       ],
       financial_summary: {
         collections_today: money(collectedToday),
         debts_remaining: money(sum(db.debts.map((item) => item.remaining))),
-        doctor_dues_remaining: money(sum(db.doctors.map((item) => item.remaining))),
+        doctor_dues_remaining: money(sum(db.doctors.map((item) => doctorSummary(item).remaining))),
       },
       recent_movements: db.payments.slice().reverse().slice(0, 5).map((payment) => ({
         ...payment,
@@ -202,7 +220,7 @@ function patientDetails(config, id) {
   return {
     data: {
       ...clone(patient),
-      sessions: db.sessions.filter((item) => item.patient_id === patient.id).map(hydrateSession),
+      sessions: db.sessions.filter((item) => item.patient_id === patient.id && item.status !== 'cancelled').map(hydrateSession),
       subscriptions: db.subscriptions.filter((item) => item.patient_id === patient.id).map(hydrateSubscription),
       wallet_movements: db.walletTransactions.filter((item) => item.patient_id === patient.id),
       debts: db.debts.filter((item) => item.patient_id === patient.id),
@@ -211,35 +229,49 @@ function patientDetails(config, id) {
   }
 }
 
-function createPatient(config) {
-  const user = requireAuth(config)
-  const payload = config.data || {}
+function patientInput(payload, current = null) {
   const errors = {}
-  if (!payload.name?.trim()) errors.name = ['الاسم الكامل مطلوب.']
-  if (!payload.phone?.trim()) errors.phone = ['رقم الهاتف مطلوب.']
-  if (!payload.age || Number(payload.age) < 0) errors.age = ['يرجى إدخال عمر صحيح.']
-  if (!payload.gender) errors.gender = ['الجنس مطلوب.']
+  const name = String(payload.name || '').trim()
+  const phone = String(payload.phone || '').trim()
+  const hasAge = payload.age !== null && payload.age !== undefined && payload.age !== ''
+  const age = hasAge ? Number(payload.age) : null
+  const gender = payload.gender || null
+  const sponsorId = payload.sponsor_id ? Number(payload.sponsor_id) : null
+  if (!name) errors.name = ['الاسم الكامل مطلوب.']
+  if (!phone) errors.phone = ['رقم الهاتف مطلوب.']
+  if (age !== null && (!Number.isInteger(age) || age < 0 || age > 130)) errors.age = ['العمر يجب أن يكون بين 0 و130.']
+  if (gender && !['male', 'female'].includes(gender)) errors.gender = ['قيمة الجنس غير صحيحة.']
+  if (sponsorId && !db.sponsors.some((item) => item.id === sponsorId && item.is_active)) errors.sponsor_id = ['الجهة المحددة غير موجودة أو غير نشطة.']
   if (Object.keys(errors).length) fail(422, 'يرجى مراجعة الحقول المطلوبة.', errors)
-  const duplicate = db.patients.find((item) => item.phone === payload.phone)
+  const duplicate = db.patients.find((item) => item.phone === phone && item.id !== current?.id)
   if (duplicate && !payload.confirm_duplicate) {
     fail(422, 'يوجد مريض مسجل برقم الهاتف نفسه. أكد الحفظ إذا كان هذا سجلًا مختلفًا.', {
       phone: ['رقم الهاتف مستخدم في سجل آخر.'],
-      confirm_duplicate: ['يلزم تأكيد إنشاء سجل مكرر.'],
+      confirm_duplicate: ['يلزم تأكيد حفظ سجل مكرر.'],
     })
   }
+  return {
+    name,
+    phone,
+    age,
+    gender,
+    area: String(payload.area || '').trim(),
+    emergency_phone: String(payload.emergency_phone || '').trim() || null,
+    sponsor_id: sponsorId,
+    is_active: payload.is_active ?? current?.is_active ?? true,
+  }
+}
+
+function createPatient(config) {
+  const user = requireAuth(config)
+  const payload = config.data || {}
+  const input = patientInput(payload)
   const patient = {
     id: nextId(db.patients),
-    name: payload.name.trim(),
-    phone: payload.phone.trim(),
-    age: Number(payload.age),
-    gender: payload.gender,
-    area: payload.area || '',
-    emergency_phone: payload.emergency_phone || null,
-    sponsor_id: payload.sponsor_id ? Number(payload.sponsor_id) : null,
+    ...input,
     wallet_balance: '0.000',
     debt_total: '0.000',
     subscription_status: null,
-    is_active: true,
     created_at: isoDateTime(0, new Date().getHours(), new Date().getMinutes()),
   }
   db.patients.unshift(patient)
@@ -251,14 +283,14 @@ function updatePatient(config, id) {
   const user = requireAuth(config)
   const patient = resourceById(db.patients, id, 'المريض')
   const old = clone(patient)
-  Object.assign(patient, config.data, { id: patient.id })
+  Object.assign(patient, patientInput(config.data || {}, patient), { id: patient.id })
   addAudit(user, 'patient_updated', 'patient', patient.id, old, patient)
   return { data: clone(hydratePatient(patient)) }
 }
 
 function listSessions(config) {
   requireAuth(config)
-  let items = db.sessions.map(hydrateSession).sort((a, b) => b.opened_at.localeCompare(a.opened_at))
+  let items = db.sessions.filter((item) => item.status !== 'cancelled').map(hydrateSession).sort((a, b) => b.opened_at.localeCompare(a.opened_at))
   items = filterBySearch(items, config.params?.search, [(item) => item.patient.name, (item) => item.patient.phone, (item) => item.code])
   if (config.params?.doctor_id) items = items.filter((item) => item.doctor_id === Number(config.params.doctor_id))
   if (config.params?.status) items = items.filter((item) => item.status === config.params.status)
@@ -616,7 +648,7 @@ function subscriptionDetails(config, id) {
   requireAuth(config)
   const stored = resourceById(db.subscriptions, id, 'الاشتراك')
   const subscription = hydrateSubscription(stored)
-  const sessions = db.sessions.filter((item) => item.subscription_id === subscription.id).map(hydrateSession).sort((a, b) => b.opened_at.localeCompare(a.opened_at))
+  const sessions = db.sessions.filter((item) => item.subscription_id === subscription.id && item.status !== 'cancelled').map(hydrateSession).sort((a, b) => b.opened_at.localeCompare(a.opened_at))
   const debts = subscriptionDebts(subscription.id)
   const payments = db.payments.filter((item) => item.subscription_id === subscription.id)
   const allocationsByPayment = new Map()
@@ -871,13 +903,14 @@ function createOpeningDebt(config, patientId) {
 function listDoctors(config) {
   requireAuth(config)
   let items = filterBySearch(db.doctors, config.params?.search, [(item) => item.name, (item) => item.phone])
+    .map((doctor) => doctorSummary(doctor, config.params))
   return paginate(items, config.params)
 }
 
 function doctorDetails(config, id) {
   requireAuth(config)
   const doctor = resourceById(db.doctors, id, 'الطبيب')
-  return { data: clone({ ...doctor, sessions: db.sessions.filter((item) => item.doctor_id === doctor.id && item.status === 'closed' && item.commission_amount !== null).map(hydrateSession), payouts: db.payouts.filter((item) => item.doctor_id === doctor.id) }) }
+  return { data: clone({ ...doctorSummary(doctor, config.params), sessions: db.sessions.filter((item) => item.doctor_id === doctor.id && item.status === 'closed' && item.commission_amount !== null).map(hydrateSession).filter((item) => Number(item.commission_amount) > 0), payouts: db.payouts.filter((item) => item.doctor_id === doctor.id) }) }
 }
 
 function saveDoctor(config, id = null) {
@@ -900,14 +933,15 @@ function saveDoctor(config, id = null) {
 function createPayout(config, doctorId) {
   const user = requireAdmin(config)
   const doctor = resourceById(db.doctors, doctorId, 'الطبيب')
+  const current = doctorSummary(doctor)
   const amount = Number(config.data?.amount || 0)
-  if (amount <= 0 || amount > Number(doctor.remaining)) fail(422, 'مبلغ الصرف يجب أن يكون أكبر من صفر وألا يتجاوز المستحق المتبقي.', { amount: ['راجع المبلغ المتاح.'] })
+  if (amount <= 0 || amount > Number(current.remaining)) fail(422, 'مبلغ الصرف يجب أن يكون أكبر من صفر وألا يتجاوز المستحق المتبقي.', { amount: ['راجع المبلغ المتاح.'] })
   const payout = { id: nextId(db.payouts), doctor_id: doctor.id, amount: money(amount), date: config.data.date || isoDate(), method: config.data.method || 'cash', note: config.data.note || '', created_by: user.id }
   db.payouts.unshift(payout)
   doctor.paid = money(Number(doctor.paid) + amount)
   doctor.remaining = money(Number(doctor.remaining) - amount)
   addAudit(user, 'doctor_paid', 'doctor', doctor.id, null, payout, payout.note)
-  return { data: clone({ payout, doctor }) }
+  return { data: clone({ payout, doctor: doctorSummary(doctor) }) }
 }
 
 function listSimple(config, collection, searchFields) {
@@ -939,7 +973,7 @@ function sponsorDetails(config, id) {
   const sponsor = resourceById(db.sponsors, id, 'الجهة الراعية')
   const patients = db.patients.filter((item) => item.sponsor_id === sponsor.id).map(hydratePatient)
   const patientIds = patients.map((item) => item.id)
-  return { data: clone({ ...sponsor, patients, sessions: db.sessions.filter((item) => patientIds.includes(item.patient_id)).map(hydrateSession), debts: db.debts.filter((item) => item.sponsor_id === sponsor.id), payments: db.payments.filter((item) => patientIds.includes(item.patient_id)) }) }
+  return { data: clone({ ...sponsor, patients, sessions: db.sessions.filter((item) => patientIds.includes(item.patient_id) && item.status !== 'cancelled').map(hydrateSession), debts: db.debts.filter((item) => item.sponsor_id === sponsor.id), payments: db.payments.filter((item) => patientIds.includes(item.patient_id)) }) }
 }
 
 function saveSponsor(config, id = null) {
@@ -1147,12 +1181,13 @@ function reportData(config, type) {
   requireAdmin(config)
   const params = config.params || {}
   if (type === 'sessions') {
-    let rows = db.sessions.map(hydrateSession)
+    let rows = db.sessions.filter((item) => item.status !== 'cancelled').map(hydrateSession)
     if (params.doctor_id) rows = rows.filter((item) => item.doctor_id === Number(params.doctor_id))
     if (params.patient_id) rows = rows.filter((item) => item.patient_id === Number(params.patient_id))
     if (params.status) rows = rows.filter((item) => item.status === params.status)
     if (params.from || params.to) rows = rows.filter((item) => inDateRange(item.opened_at, params))
-    return { data: { rows: clone(rows), totals: { count: rows.length, service_value: money(sum(rows.filter((item) => item.status === 'closed' && item.type === 'individual').map((item) => item.net_total))) } } }
+    rows = rows.map((item) => ({ ...item, collected_amount: money(item.status === 'closed' && item.type === 'individual' ? Number(item.settlement.wallet_amount) + Number(item.settlement.paid_amount) : 0) }))
+    return { data: { rows: clone(rows), totals: { count: rows.length, service_value: money(sum(rows.map((item) => item.collected_amount))) } } }
   }
   if (type === 'collections') {
     let rows = db.payments.map((item) => ({
@@ -1177,7 +1212,7 @@ function reportData(config, type) {
     return { data: { rows: clone(rows), totals: { original: money(sum(rows.map((item) => item.amount))), paid: money(sum(rows.map((item) => item.paid_amount))), remaining: money(sum(rows.map((item) => item.remaining))) } } }
   }
   if (type === 'doctor-dues') {
-    let rows = db.doctors.map((item) => ({ ...item }))
+    let rows = db.doctors.map((item) => doctorSummary(item, params))
     if (params.doctor_id) rows = rows.filter((item) => item.id === Number(params.doctor_id))
     return { data: { rows: clone(rows), totals: { earned: money(sum(rows.map((item) => item.earned))), paid: money(sum(rows.map((item) => item.paid))), remaining: money(sum(rows.map((item) => item.remaining))) } } }
   }
@@ -1201,7 +1236,7 @@ function reportData(config, type) {
   let rows = db.subscriptions.map((subscription) => ({
     ...hydrateSubscription(subscription),
     supervised_sessions: db.sessions
-      .filter((session) => session.subscription_id === subscription.id && session.type === 'subscription' && ['closed', 'cancelled'].includes(session.status))
+      .filter((session) => session.subscription_id === subscription.id && session.type === 'subscription' && session.status === 'closed')
       .filter((session) => (!params.from && !params.to) || inDateRange(session.opened_at, params))
       .filter((session) => !params.doctor_id || session.doctor_id === Number(params.doctor_id))
       .map((session) => ({
@@ -1277,7 +1312,11 @@ export async function mockRequest(config) {
 
   if (path === '/sessions' && method === 'GET') return listSessions(config)
   if (path === '/sessions' && method === 'POST') return createSession(config)
-  if (segments[0] === 'sessions' && segments.length === 2 && method === 'GET') return { data: clone(hydrateSession(resourceById(db.sessions, segments[1], 'الجلسة'))) }
+  if (segments[0] === 'sessions' && segments.length === 2 && method === 'GET') {
+    const session = resourceById(db.sessions, segments[1], 'الجلسة')
+    if (session.status === 'cancelled') fail(404, 'تعذر العثور على السجل المطلوب.')
+    return { data: clone(hydrateSession(session)) }
+  }
   if (segments[0] === 'sessions' && segments.length === 2 && method === 'PATCH') return updateSession(config, segments[1])
   if (segments[0] === 'sessions' && segments[2] === 'services' && method === 'POST') return addSessionServices(config, segments[1])
   if (segments[0] === 'sessions' && segments[2] === 'close' && method === 'POST') return closeSession(config, segments[1])

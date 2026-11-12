@@ -11,7 +11,7 @@
     </div>
     <MoneyText v-if="money" class="stat-value" :value="value" />
     <strong v-else class="stat-value ltr-value">{{ formatNumber(value) }}</strong>
-    <span v-if="caption" class="stat-caption">{{ caption }}</span>
+    <!-- <span v-if="caption" class="stat-caption">{{ caption }}</span> -->
     <v-icon v-if="to" class="stat-affordance" icon="mdi-arrow-left" size="18" aria-hidden="true" />
   </component>
 </template>

@@ -4,12 +4,14 @@ use crate::models::{
     RuntimeInfo,
 };
 use crate::runtime;
+use crate::{native_process, runtime_files};
 use chrono::{Local, SecondsFormat};
 use sha2::{Digest, Sha256};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufReader, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Output, Stdio};
+use std::time::Duration;
 use uuid::Uuid;
 
 const BACKUP_FORMAT_VERSION: u32 = 1;
@@ -108,7 +110,7 @@ fn create_backup_on_drive(
         )?;
         sync_directory(&partial_folder)?;
         validate_backup_folder(&partial_folder)?;
-        fs::rename(&partial_folder, &final_folder)
+        runtime_files::replace_path(&partial_folder, &final_folder)
             .map_err(|error| format!("تعذر اعتماد مجلد النسخة الاحتياطية: {error}"))?;
         sync_directory(&date_folder)?;
         incomplete_folder = None;
@@ -196,6 +198,9 @@ pub fn restore_backup(
         .lock()
         .map_err(|_| "تعذر بدء عملية استعادة النسخة الاحتياطية.".to_string())?;
     validate_backup_id(backup_id)?;
+    if runtime::context(state)?.config.activated {
+        return Err("الاستعادة من هذه الشاشة مخصصة للتثبيت الأول. استرداد تثبيت مفعّل يتطلب خطة استرداد بواسطة المسؤول.".into());
+    }
     let context = runtime::ensure_mysql_running(state)?;
     let (_, drive_root) = resolve_drive(drive_id)?;
     restore_backup_from_drive(state, &context, &drive_root, backup_id)
@@ -224,6 +229,8 @@ fn restore_backup_from_drive(
     let normalized_dump = work_dir.join("restored-and-migrated.sql");
     let safety_dump = work_dir.join("pre-restore-safety.sql");
     let staging_database = format!("clinic_restore_{}", Uuid::new_v4().simple());
+    let mut replacement_started = false;
+    let mut safety_verified = false;
 
     let result = (|| {
         create_database(&context, &staging_database)?;
@@ -240,9 +247,13 @@ fn restore_backup_from_drive(
         if had_existing_data {
             dump_database(&context, &context.config.database, &safety_dump)?;
             verify_dump_can_restore(&context, &safety_dump)?;
+            safety_verified = true;
         }
 
         runtime::stop_rust_api(state)?;
+        // Persist this before DROP/IMPORT so a power loss cannot expose a partial database.
+        runtime::begin_database_replacement(state, &work_dir)?;
+        replacement_started = true;
         let replacement = replace_database(&context, &normalized_dump).and_then(|_| {
             runtime::migrate_database(&context, &context.config.database, false)?;
             validate_database(&context, &context.config.database)
@@ -250,25 +261,66 @@ fn restore_backup_from_drive(
 
         if let Err(error) = replacement {
             if had_existing_data {
-                let rollback = replace_database(&context, &safety_dump);
+                let rollback = replace_database(&context, &safety_dump)
+                    .and_then(|_| validate_database(&context, &context.config.database));
                 if let Err(rollback_error) = rollback {
-                    return Err(format!(
+                    let failure = format!(
                         "فشلت الاستعادة ({error}) وفشل الرجوع إلى النسخة الداخلية ({rollback_error}). احتفظ بمجلد النسخة ولا تشغّل النظام قبل الصيانة."
-                    ));
+                    );
+                    runtime::require_recovery(state, &failure);
+                    return Err(failure);
                 }
-                let _ = runtime::start_rust_api(state);
+                runtime::finish_database_replacement(state)?;
+                if context.config.activated {
+                    if let Err(start_error) = runtime::start_rust_api(state) {
+                        runtime::record_runtime_error(state, &start_error);
+                    }
+                }
                 return Err(format!(
                     "فشلت الاستعادة وتمت إعادة قاعدة البيانات السابقة بأمان: {error}"
                 ));
             }
+            runtime::require_recovery(state, &error);
             return Err(error);
         }
 
+        runtime::finish_database_replacement(state)?;
         runtime::mark_activated_and_start_api(state)
     })();
 
     let _ = drop_database(&context, &staging_database);
-    let _ = fs::remove_dir_all(&work_dir);
+    finish_restore_work(
+        &work_dir,
+        &safety_dump,
+        result,
+        replacement_started,
+        safety_verified,
+    )
+}
+
+fn finish_restore_work(
+    work_dir: &Path,
+    safety_dump: &Path,
+    result: Result<RuntimeInfo, String>,
+    replacement_started: bool,
+    safety_verified: bool,
+) -> Result<RuntimeInfo, String> {
+    if result.is_err() && replacement_started {
+        return result.map_err(|error| {
+            if safety_verified {
+                format!(
+                    "{error}\nحُفظت نسخة الرجوع المجرّبة في: {}",
+                    safety_dump.display()
+                )
+            } else {
+                format!(
+                    "{error}\nحُفظت ملفات الاستعادة للفحص في: {}",
+                    work_dir.display()
+                )
+            }
+        });
+    }
+    let _ = fs::remove_dir_all(work_dir);
     result
 }
 
@@ -287,10 +339,10 @@ fn validate_backup_folder(folder: &Path) -> Result<BackupManifest, String> {
             "هذه النسخة أُنشئت بإصدار أحدث من التطبيق. حدّث التطبيق قبل الاستعادة.".to_string(),
         );
     }
-    if Path::new(&manifest.dump_file)
+    let dump_components = Path::new(&manifest.dump_file)
         .components()
-        .any(|component| !matches!(component, Component::Normal(_)))
-    {
+        .collect::<Vec<_>>();
+    if dump_components.len() != 1 || !matches!(dump_components[0], Component::Normal(_)) {
         return Err("اسم ملف قاعدة البيانات داخل النسخة غير آمن.".to_string());
     }
     let complete = fs::read_to_string(&complete_path)
@@ -300,6 +352,15 @@ fn validate_backup_folder(folder: &Path) -> Result<BackupManifest, String> {
         return Err("فشل التحقق من سلامة ملف وصف النسخة.".to_string());
     }
     let dump_path = folder.join(&manifest.dump_file);
+    let canonical_dump = dump_path
+        .canonicalize()
+        .map_err(|_| "تعذر الوصول إلى ملف النسخة.".to_string())?;
+    let canonical_folder = folder
+        .canonicalize()
+        .map_err(|_| "تعذر الوصول إلى مجلد النسخة.".to_string())?;
+    if canonical_dump.parent() != Some(canonical_folder.as_path()) {
+        return Err("ملف النسخة يجب أن يكون داخل مجلد النسخة المعتمد مباشرة.".into());
+    }
     let metadata = fs::metadata(&dump_path)
         .map_err(|_| "ملف قاعدة البيانات غير موجود داخل النسخة.".to_string())?;
     if metadata.len() != manifest.dump_size {
@@ -330,7 +391,8 @@ fn dump_database(
 ) -> Result<(), String> {
     let file = File::create(destination)
         .map_err(|error| format!("تعذر إنشاء ملف النسخة الاحتياطية: {error}"))?;
-    let output = runtime::mysqldump_command(context)
+    let mut command = runtime::mysqldump_command(context);
+    command
         .args([
             "--single-transaction",
             "--quick",
@@ -344,9 +406,12 @@ fn dump_database(
             database,
         ])
         .stdout(Stdio::from(file))
-        .stderr(Stdio::piped())
-        .output()
-        .map_err(|error| format!("تعذر تشغيل mysqldump: {error}"))?;
+        .stderr(Stdio::piped());
+    let output = native_process::output(
+        &mut command,
+        Duration::from_secs(900),
+        "إنشاء النسخة الاحتياطية",
+    )?;
     ensure_success(output, "فشل إنشاء نسخة قاعدة البيانات")?;
     sync_file(destination)
 }
@@ -358,13 +423,17 @@ fn import_database(
 ) -> Result<(), String> {
     let input =
         File::open(source).map_err(|error| format!("تعذر فتح ملف النسخة للاستعادة: {error}"))?;
-    let output = runtime::mysql_command(context)
+    let mut command = runtime::mysql_command(context);
+    command
         .args(["--default-character-set=utf8mb4", "--database", database])
         .stdin(Stdio::from(input))
         .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .output()
-        .map_err(|error| format!("تعذر تشغيل استعادة MySQL: {error}"))?;
+        .stderr(Stdio::piped());
+    let output = native_process::output(
+        &mut command,
+        Duration::from_secs(900),
+        "استيراد النسخة الاحتياطية",
+    )?;
     ensure_success(output, "فشل استيراد قاعدة البيانات")
 }
 
@@ -406,27 +475,7 @@ fn validate_database(
     context: &crate::models::RuntimeContext,
     database: &str,
 ) -> Result<(), String> {
-    let query = format!(
-        "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '{}' AND table_name IN ('migrations','users','settings')",
-        database.replace('\'', "''")
-    );
-    let output = runtime::mysql_output(
-        context,
-        &[
-            "--batch".to_string(),
-            "--skip-column-names".to_string(),
-            "-e".to_string(),
-            query,
-        ],
-    )?;
-    let count = String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .parse::<u8>()
-        .unwrap_or(0);
-    if count < 2 {
-        return Err("قاعدة البيانات المستعادة لا تحتوي على جداول النظام الأساسية.".to_string());
-    }
-    Ok(())
+    runtime::validate_restored_database(context, database)
 }
 
 fn database_has_tables(
@@ -449,7 +498,9 @@ fn database_has_tables(
     Ok(String::from_utf8_lossy(&output.stdout)
         .trim()
         .parse::<u64>()
-        .unwrap_or(0)
+        .map_err(|_| {
+            "تعذر تأكيد حالة قاعدة البيانات قبل الاستعادة؛ لم تُستبدل البيانات.".to_string()
+        })?
         > 0)
 }
 
@@ -611,6 +662,110 @@ mod tests {
     }
 
     #[test]
+    fn failed_restore_keeps_the_verified_rollback_file() {
+        let root = std::env::temp_dir().join(format!(
+            "clinic-restore-failure-test-{}",
+            Uuid::new_v4().simple()
+        ));
+        fs::create_dir(&root).unwrap();
+        let safety = root.join("pre-restore-safety.sql");
+        fs::write(&safety, b"verified rollback fixture").unwrap();
+        let failure = super::finish_restore_work(
+            &root,
+            &safety,
+            Err("restore and rollback failed".into()),
+            true,
+            true,
+        )
+        .unwrap_err();
+        assert!(failure.contains(&safety.to_string_lossy().to_string()));
+        assert_eq!(fs::read(&safety).unwrap(), b"verified rollback fixture");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn rejected_backup_cleans_staging_before_any_replacement() {
+        let root = std::env::temp_dir().join(format!(
+            "clinic-restore-rejected-test-{}",
+            Uuid::new_v4().simple()
+        ));
+        fs::create_dir(&root).unwrap();
+        let safety = root.join("pre-restore-safety.sql");
+        fs::write(&safety, b"scratch fixture").unwrap();
+        assert!(super::finish_restore_work(
+            &root,
+            &safety,
+            Err("rejected backup".into()),
+            false,
+            false
+        )
+        .is_err());
+        assert!(!root.exists());
+    }
+
+    #[test]
+    fn failed_first_restore_preserves_its_normalized_dump_for_recovery() {
+        let root = std::env::temp_dir().join(format!(
+            "clinic-first-restore-test-{}",
+            Uuid::new_v4().simple()
+        ));
+        fs::create_dir(&root).unwrap();
+        let normalized = root.join("restored-and-migrated.sql");
+        fs::write(&normalized, b"test normalized dump").unwrap();
+        let failure = super::finish_restore_work(
+            &root,
+            &root.join("pre-restore-safety.sql"),
+            Err("test import failure".into()),
+            true,
+            false,
+        )
+        .unwrap_err();
+        assert!(failure.contains(&root.display().to_string()));
+        assert_eq!(fs::read(normalized).unwrap(), b"test normalized dump");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn backup_manifest_rejects_traversal_and_changed_dump_bytes() {
+        let root = std::env::temp_dir().join(format!(
+            "clinic-backup-manifest-test-{}",
+            Uuid::new_v4().simple()
+        ));
+        fs::create_dir(&root).unwrap();
+        let dump = b"synthetic SQL fixture";
+        fs::write(root.join("database.sql"), dump).unwrap();
+        let mut manifest = crate::models::BackupManifest {
+            format_version: super::BACKUP_FORMAT_VERSION,
+            app_version: env!("CARGO_PKG_VERSION").into(),
+            created_at: "2026-11-12T00:00:00Z".into(),
+            database: "clinic_test".into(),
+            dump_file: "database.sql".into(),
+            dump_sha256: super::sha256_bytes(dump),
+            dump_size: dump.len() as u64,
+            verified_restore: true,
+        };
+        let write_manifest = |manifest: &crate::models::BackupManifest| {
+            let bytes = serde_json::to_vec(manifest).unwrap();
+            fs::write(root.join(super::MANIFEST_FILE), &bytes).unwrap();
+            fs::write(
+                root.join(super::COMPLETE_FILE),
+                format!("{}  {}", super::sha256_bytes(&bytes), super::MANIFEST_FILE),
+            )
+            .unwrap();
+        };
+        write_manifest(&manifest);
+        assert!(super::validate_backup_folder(&root).is_ok());
+        manifest.dump_file = "../database.sql".into();
+        write_manifest(&manifest);
+        assert!(super::validate_backup_folder(&root).is_err());
+        manifest.dump_file = "database.sql".into();
+        write_manifest(&manifest);
+        fs::write(root.join("database.sql"), vec![b'x'; dump.len()]).unwrap();
+        assert!(super::validate_backup_folder(&root).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn backup_identifier_requires_exact_date_and_time_folders() {
         assert!(validate_backup_id("2026-11-01/14-30-00").is_ok());
         assert!(validate_backup_id("../secret").is_err());
@@ -657,7 +812,7 @@ mod tests {
                 app_user: "clinic_backup".into(),
                 app_password: "AppBackup123!".into(),
                 root_password: "RootBackup123!".into(),
-                app_key: "test".into(),
+                app_key: "base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into(),
                 activated: false,
             });
             inner.paths = Some(RuntimePaths {
@@ -668,13 +823,31 @@ mod tests {
                 config_file: runtime_dir.join("install.json"),
                 root_client_file: runtime_dir.join("mysql-root.cnf"),
             });
-            inner.executables = Some(RuntimeExecutables {
-                mysqld: PathBuf::from("/usr/sbin/mysqld"),
-                mysql: PathBuf::from("/usr/bin/mysql"),
-                mysqldump: PathBuf::from("/usr/bin/mysqldump"),
-                mysqladmin: PathBuf::from("/usr/bin/mysqladmin"),
-                mysql_base: None,
-            });
+            #[cfg(windows)]
+            {
+                let base = std::env::var_os("CLINIC_TEST_MYSQL_BASE")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| {
+                        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/runtime/mysql")
+                    });
+                inner.executables = Some(RuntimeExecutables {
+                    mysqld: base.join("bin/mysqld.exe"),
+                    mysql: base.join("bin/mysql.exe"),
+                    mysqldump: base.join("bin/mysqldump.exe"),
+                    mysqladmin: base.join("bin/mysqladmin.exe"),
+                    mysql_base: Some(base),
+                });
+            }
+            #[cfg(not(windows))]
+            {
+                inner.executables = Some(RuntimeExecutables {
+                    mysqld: PathBuf::from("/usr/sbin/mysqld"),
+                    mysql: PathBuf::from("/usr/bin/mysql"),
+                    mysqldump: PathBuf::from("/usr/bin/mysqldump"),
+                    mysqladmin: PathBuf::from("/usr/bin/mysqladmin"),
+                    mysql_base: None,
+                });
+            }
         }
         let _cleanup = RuntimeCleanup {
             state: state.clone(),
@@ -726,6 +899,9 @@ mod tests {
         let backups = list_backups_on_drive(&drive_root).expect("list verified backup");
         assert_eq!(backups.len(), 1);
         assert_eq!(backups[0].checksum, backup.checksum);
+        assert!(super::restore_backup(&state, "test-usb", &backups[0].id)
+            .unwrap_err()
+            .contains("للتثبيت الأول"));
 
         runtime::mysql_output(
             &context,
@@ -745,6 +921,7 @@ mod tests {
             .expect("restore verified backup");
         assert!(info.ready);
         assert!(info.activated);
+        assert!(!context.paths.runtime_dir.join("RECOVERY_REQUIRED").exists());
         let restored_context = runtime::context(&state).expect("read restored runtime context");
         let output = runtime::mysql_output(
             &restored_context,

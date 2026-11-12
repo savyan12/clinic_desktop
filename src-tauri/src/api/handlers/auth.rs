@@ -9,11 +9,24 @@ use bcrypt::verify;
 use chrono::{SecondsFormat, Utc};
 use serde_json::{json, Value};
 
-pub async fn health() -> Json<Value> {
-    Json(json!({
-        "status": "ok",
-        "time": Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true),
-    }))
+pub async fn health(State(state): State<AppState>) -> (StatusCode, Json<Value>) {
+    let ready = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        sqlx::query_scalar::<_, i32>("SELECT 1").fetch_one(&state.pool),
+    )
+    .await
+    .is_ok_and(|result| result.is_ok_and(|value| value == 1));
+    (
+        if ready {
+            StatusCode::OK
+        } else {
+            StatusCode::SERVICE_UNAVAILABLE
+        },
+        Json(json!({
+            "status": if ready { "ok" } else { "unavailable" },
+            "time": Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true),
+        })),
+    )
 }
 
 pub async fn login(
@@ -99,4 +112,41 @@ pub async fn me(auth: AuthUser) -> Json<Value> {
 fn invalid_credentials() -> ApiError {
     ApiError::validation("اسم المستخدم أو كلمة المرور غير صحيحة.")
         .field("username", "تعذر تسجيل الدخول بهذه البيانات.")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[tokio::test]
+    async fn health_reports_unavailable_when_mysql_is_unreachable() {
+        let pool = sqlx::mysql::MySqlPoolOptions::new()
+            .acquire_timeout(std::time::Duration::from_millis(100))
+            .connect_lazy_with(
+                sqlx::mysql::MySqlConnectOptions::new()
+                    .host("127.0.0.1")
+                    .port(0)
+                    .username("health-fixture")
+                    .password("fixture")
+                    .database("clinic_health_test"),
+            );
+        let (status, response) = health(State(AppState {
+            pool: pool.clone(),
+            login_rate_limiter: Default::default(),
+            config: crate::api::config::ApiConfig {
+                host: "127.0.0.1".into(),
+                port: 0,
+                mysql_host: "127.0.0.1".into(),
+                mysql_port: 0,
+                database: "clinic_health_test".into(),
+                username: "health-fixture".into(),
+                password: "fixture".into(),
+                commission_base: Default::default(),
+                subscription_follow_up_sessions: 2,
+            },
+        }))
+        .await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(response.0["status"], "unavailable");
+        pool.close().await;
+    }
 }

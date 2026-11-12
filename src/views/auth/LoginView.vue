@@ -5,6 +5,12 @@
         <h1>تسجيل الدخول</h1>
         <p>استخدم حسابك المعتمد للوصول إلى مساحة العمل.</p>
       </div>
+      <v-alert
+        v-if="desktop.runtime.recovery_notice"
+        type="info"
+        variant="tonal"
+        role="status"
+      >{{ desktop.runtime.recovery_notice }}</v-alert>
       <InlineError v-if="error" :message="error" />
       <v-form @submit.prevent="submit">
         <div class="login-fields">
@@ -56,8 +62,10 @@ import { reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import InlineError from "@/components/common/InlineError.vue";
 import { useAuthStore } from "@/stores/auth";
+import { useDesktopStore } from "@/stores/desktop";
 
 const auth = useAuthStore();
+const desktop = useDesktopStore();
 const router = useRouter();
 const route = useRoute();
 const isMock = import.meta.env.VITE_USE_MOCK === "true";

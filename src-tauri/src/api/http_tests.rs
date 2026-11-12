@@ -753,6 +753,13 @@ async fn http_auth_dashboard_reports_and_exports_match_desktop_contract() {
         assert!(report["data"]["totals"][total_key].is_string());
         if report_type == "sessions" {
             assert_eq!(report["data"]["totals"]["service_value"], "80.000");
+            let individual_row = report["data"]["rows"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|row| row["id"] == session_id)
+                .expect("individual session report row");
+            assert_eq!(individual_row["collected_amount"], "80.000");
         }
         if report_type == "doctor-dues" {
             assert_eq!(
@@ -1327,6 +1334,73 @@ async fn correction_and_paid_debt_cancellation_use_reversing_records() {
             .len(),
         1
     );
+    let hidden_show = request(
+        &context.app,
+        Method::GET,
+        &format!("/api/v1/sessions/{debt_session_id}"),
+        Some(&context.admin_token),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(hidden_show.status, StatusCode::NOT_FOUND);
+
+    let sessions_index = request(
+        &context.app,
+        Method::GET,
+        "/api/v1/sessions?per_page=100",
+        Some(&context.admin_token),
+        None,
+        None,
+    )
+    .await;
+    assert!(!sessions_index.json()["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|session| session["id"] == debt_session_id));
+
+    let patient_show = request(
+        &context.app,
+        Method::GET,
+        &format!("/api/v1/patients/{}", context.patient_id),
+        Some(&context.admin_token),
+        None,
+        None,
+    )
+    .await;
+    assert!(!patient_show.json()["data"]["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|session| session["id"] == debt_session_id));
+
+    let dashboard = request(
+        &context.app,
+        Method::GET,
+        "/api/v1/dashboard",
+        Some(&context.admin_token),
+        None,
+        None,
+    )
+    .await;
+    assert!(!dashboard.json()["data"]["today_sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|session| session["id"] == debt_session_id));
+
+    let report = request(
+        &context.app,
+        Method::GET,
+        "/api/v1/reports/sessions?status=cancelled",
+        Some(&context.admin_token),
+        None,
+        None,
+    )
+    .await;
+    assert!(report.json()["data"]["rows"].as_array().unwrap().is_empty());
+
     let debt_status = sqlx::query_scalar::<_, String>("SELECT status FROM debts WHERE id = ?")
         .bind(debt_id)
         .fetch_one(&context.pool)

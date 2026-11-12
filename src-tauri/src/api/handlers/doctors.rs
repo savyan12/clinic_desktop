@@ -4,7 +4,7 @@ use crate::api::{
     error::{ApiError, ApiResult},
     idempotency, loaders, money, pagination, resources,
     rows::{DoctorPayoutRow, DoctorRow, SessionRow},
-    services::ledger,
+    services::{commissions, ledger},
     validation, AppState,
 };
 use axum::{
@@ -120,7 +120,10 @@ async fn detail(
     ).bind(id).bind(query.from).bind(query.from).bind(query.to).bind(query.to).fetch_all(&state.pool).await?;
     let mut session_values = Vec::new();
     for session in &sessions {
-        session_values.push(loaders::session_from_row(&state.pool, session).await?);
+        let value = loaders::session_from_row(&state.pool, session).await?;
+        if value["commission_amount"].as_str() != Some("0.000") {
+            session_values.push(value);
+        }
     }
     let payouts = sqlx::query_as::<_, DoctorPayoutRow>(
         "SELECT * FROM doctor_payouts WHERE doctor_id = ? AND (? IS NULL OR date >= ?) AND (? IS NULL OR date <= ?) ORDER BY date DESC, id DESC",
@@ -207,22 +210,49 @@ pub async fn payout(
     let note = validation::optional_string(data, "note", 1000)?;
     let actor_id = auth.user.id;
     let route = format!("api/v1/doctors/{id}/payouts");
-    let (status, response) = idempotency::execute(&state.pool, &auth, &key, "POST", &route, &payload, move |transaction| {
-        let method = method.clone();
-        let note = note.clone();
-        Box::pin(async move {
-            let payout = ledger::doctor_payout(transaction, id, amount, date, &method, note.as_deref(), actor_id).await?;
-            let remaining = {
-                let earned = sqlx::query_scalar::<_, Option<Decimal>>("SELECT SUM(commission_amount) FROM sessions WHERE doctor_id = ? AND type = 'individual' AND status = 'closed' AND commission_amount IS NOT NULL").bind(id).fetch_one(&mut **transaction).await?.unwrap_or(Decimal::ZERO);
-                let paid = sqlx::query_scalar::<_, Option<Decimal>>("SELECT SUM(amount) FROM doctor_payouts WHERE doctor_id = ?").bind(id).fetch_one(&mut **transaction).await?.unwrap_or(Decimal::ZERO);
-                earned - paid
-            };
-            Ok((StatusCode::CREATED, json!({ "data": {
-                "payout": resources::doctor_payout_value(&payout),
-                "remaining": money::normalize(remaining),
-            }})))
-        })
-    }).await?;
+    let (status, response) = idempotency::execute(
+        &state.pool,
+        &auth,
+        &key,
+        "POST",
+        &route,
+        &payload,
+        move |transaction| {
+            let method = method.clone();
+            let note = note.clone();
+            Box::pin(async move {
+                let payout = ledger::doctor_payout(
+                    transaction,
+                    id,
+                    amount,
+                    date,
+                    &method,
+                    note.as_deref(),
+                    actor_id,
+                )
+                .await?;
+                let remaining = {
+                    let earned = commissions::doctor_earned_transaction(transaction, id).await?;
+                    let paid = sqlx::query_scalar::<_, Option<Decimal>>(
+                        "SELECT SUM(amount) FROM doctor_payouts WHERE doctor_id = ?",
+                    )
+                    .bind(id)
+                    .fetch_one(&mut **transaction)
+                    .await?
+                    .unwrap_or(Decimal::ZERO);
+                    earned - paid
+                };
+                Ok((
+                    StatusCode::CREATED,
+                    json!({ "data": {
+                        "payout": resources::doctor_payout_value(&payout),
+                        "remaining": money::normalize(remaining),
+                    }}),
+                ))
+            })
+        },
+    )
+    .await?;
     Ok((status, Json(response)))
 }
 
@@ -264,10 +294,9 @@ async fn period_totals(
     from: Option<NaiveDate>,
     to: Option<NaiveDate>,
 ) -> ApiResult<(u64, Decimal, Decimal)> {
-    let count = sqlx::query_scalar::<_, u64>("SELECT CAST(COUNT(*) AS UNSIGNED) FROM sessions WHERE doctor_id = ? AND type = 'individual' AND status = 'closed' AND commission_amount IS NOT NULL AND (? IS NULL OR DATE(closed_at) >= ?) AND (? IS NULL OR DATE(closed_at) <= ?)")
+    let count = sqlx::query_scalar::<_, u64>("SELECT CAST(COUNT(*) AS UNSIGNED) FROM sessions s WHERE doctor_id = ? AND type = 'individual' AND status = 'closed' AND commission_amount IS NOT NULL AND (? IS NULL OR DATE(closed_at) >= ?) AND (? IS NULL OR DATE(closed_at) <= ?) AND CASE WHEN s.net_total <= 0 THEN 0 ELSE ROUND(s.commission_amount * GREATEST(s.net_total - COALESCE((SELECT SUM(d.amount - d.paid_amount) FROM debts d WHERE d.session_id = s.id AND d.status <> 'void'), 0), 0) / s.net_total, 3) END > 0")
         .bind(id).bind(from).bind(from).bind(to).bind(to).fetch_one(&state.pool).await?;
-    let earned = sqlx::query_scalar::<_, Option<Decimal>>("SELECT SUM(commission_amount) FROM sessions WHERE doctor_id = ? AND type = 'individual' AND status = 'closed' AND commission_amount IS NOT NULL AND (? IS NULL OR DATE(closed_at) >= ?) AND (? IS NULL OR DATE(closed_at) <= ?)")
-        .bind(id).bind(from).bind(from).bind(to).bind(to).fetch_one(&state.pool).await?.unwrap_or(Decimal::ZERO);
+    let earned = commissions::doctor_earned_pool(&state.pool, id, from, to).await?;
     let paid = sqlx::query_scalar::<_, Option<Decimal>>("SELECT SUM(amount) FROM doctor_payouts WHERE doctor_id = ? AND (? IS NULL OR date >= ?) AND (? IS NULL OR date <= ?)")
         .bind(id).bind(from).bind(from).bind(to).bind(to).fetch_one(&state.pool).await?.unwrap_or(Decimal::ZERO);
     Ok((count, earned, paid))

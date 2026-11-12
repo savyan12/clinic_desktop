@@ -51,6 +51,7 @@ pub async fn index(
     let to = (!receptionist_today).then_some(query.to).flatten();
     let filter = "FROM sessions s INNER JOIN patients p ON p.id = s.patient_id \
         WHERE (? = 0 OR DATE(s.opened_at) = CURDATE()) \
+          AND s.status <> 'cancelled' \
           AND (? = '' OR p.name LIKE ? OR p.phone LIKE ? OR s.code LIKE ?) \
           AND (? IS NULL OR s.doctor_id = ?) \
           AND (? = '' OR s.status = ?) \

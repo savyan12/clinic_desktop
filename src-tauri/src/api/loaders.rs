@@ -5,17 +5,20 @@ use super::{
         PatientRow, SessionAdditionRow, SessionRow, SessionServiceRow, SubscriptionRow,
         SubscriptionServiceRow,
     },
+    services::commissions,
 };
 use rust_decimal::Decimal;
 use serde_json::{json, Value};
 use sqlx::{MySqlPool, Row};
 
 pub async fn session(pool: &MySqlPool, id: u64, include_wallet: bool) -> ApiResult<Value> {
-    let session = sqlx::query_as::<_, SessionRow>("SELECT * FROM sessions WHERE id = ?")
-        .bind(id)
-        .fetch_optional(pool)
-        .await?
-        .ok_or_else(ApiError::not_found)?;
+    let session = sqlx::query_as::<_, SessionRow>(
+        "SELECT * FROM sessions WHERE id = ? AND status <> 'cancelled'",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?
+    .ok_or_else(ApiError::not_found)?;
     session_detail_from_row(pool, &session, include_wallet).await
 }
 
@@ -35,6 +38,7 @@ async fn session_summary_from_row(
     session: &SessionRow,
     include_patient: bool,
 ) -> ApiResult<Value> {
+    let effective_session = commissions::effective_session_pool(pool, session).await?;
     let patient = if include_patient {
         let patient = sqlx::query_as::<_, PatientRow>("SELECT * FROM patients WHERE id = ?")
             .bind(session.patient_id)
@@ -63,7 +67,7 @@ async fn session_summary_from_row(
     .collect::<Vec<_>>();
 
     Ok(resources::session_value(
-        session,
+        &effective_session,
         patient,
         Some(doctor),
         Some(services),
@@ -79,6 +83,7 @@ async fn session_detail_from_row(
     session: &SessionRow,
     include_wallet: bool,
 ) -> ApiResult<Value> {
+    let effective_session = commissions::effective_session_pool(pool, session).await?;
     let patient = sqlx::query_as::<_, PatientRow>("SELECT * FROM patients WHERE id = ?")
         .bind(session.patient_id)
         .fetch_one(pool)
@@ -130,7 +135,7 @@ async fn session_detail_from_row(
     });
 
     Ok(resources::session_value(
-        session,
+        &effective_session,
         Some(patient_value),
         Some(doctor_value),
         Some(services),

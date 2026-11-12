@@ -4,16 +4,13 @@
       title="إعدادات النظام"
       subtitle="الطباعة والخطوط والنسخ الاحتياطي المحلي"
     >
-      <template #actions
-        ><v-btn
-          color="primary"
-          prepend-icon="mdi-content-save-outline"
-          data-form-flow-primary
-          :loading="saving"
-          @click="save"
-          >حفظ الإعدادات</v-btn
-        ></template
-      >
+      <template #actions><v-btn
+        color="primary"
+        prepend-icon="mdi-content-save-outline"
+        data-form-flow-primary
+        :loading="saving"
+        @click="save"
+      >حفظ الإعدادات</v-btn></template>
     </PageHeader>
     <v-skeleton-loader v-if="loading" type="heading, article, image" />
     <InlineError v-else-if="error" :message="error" retry @retry="load" />
@@ -35,18 +32,14 @@
           aria-label="اختيار لون التفاعل"
           @update:model-value="applyAccent"
         >
-          <v-btn value="blue"
-            ><span
-              class="accent-swatch swatch-blue"
-              aria-hidden="true"
-            />أزرق</v-btn
-          >
-          <v-btn value="emerald"
-            ><span
-              class="accent-swatch swatch-emerald"
-              aria-hidden="true"
-            />زمردي</v-btn
-          >
+          <v-btn value="blue"><span
+            class="accent-swatch swatch-blue"
+            aria-hidden="true"
+          />أزرق</v-btn>
+          <v-btn value="emerald"><span
+            class="accent-swatch swatch-emerald"
+            aria-hidden="true"
+          />زمردي</v-btn>
         </v-btn-toggle>
       </section>
 
@@ -96,8 +89,7 @@
                     role="radio"
                     :aria-checked="form[control.sizeKey] === option.value"
                     :aria-label="`${option.title}، ${option.value} بكسل`"
-                    >{{ option.title }}</v-btn
-                  >
+                  >{{ option.title }}</v-btn>
                 </v-btn-toggle>
               </div>
 
@@ -138,12 +130,8 @@
               <strong :style="previewStyleFor(control)">{{
                 control.preview
               }}</strong>
-              <small
-                ><bdi dir="ltr"
-                  >{{ form[control.sizeKey] }} px ·
-                  {{ form[control.weightKey] }}</bdi
-                ></small
-              >
+              <small><bdi dir="ltr">{{ form[control.sizeKey] }} px ·
+                {{ form[control.weightKey] }}</bdi></small>
             </aside>
           </article>
         </div>
@@ -189,8 +177,7 @@
             prepend-icon="mdi-refresh"
             :loading="loadingDrives"
             @click="refreshDrives"
-            >تحديث الوحدات</v-btn
-          >
+          >تحديث الوحدات</v-btn>
         </div>
         <InlineError v-if="backupError" :message="backupError" />
         <v-select
@@ -202,20 +189,14 @@
           no-data-text="لا توجد وحدة USB متصلة"
         />
         <div class="backup-warning">
-          <v-icon icon="mdi-usb-flash-drive-outline" /><span
-            >لا تنزع وحدة USB أثناء النسخ أو التحقق. لا تُعد النسخة ناجحة إلا
-            بعد ظهور رسالة اكتمال التحقق.</span
-          >
+          <v-icon icon="mdi-usb-flash-drive-outline" /><span>لا تنزع وحدة USB أثناء النسخ أو التحقق. لا تُعد النسخة ناجحة إلا
+            بعد ظهور رسالة اكتمال التحقق.</span>
         </div>
         <div v-if="backupResult" class="backup-result">
           <v-icon icon="mdi-shield-check-outline" />
           <div>
-            <strong>تم إنشاء نسخة موثقة ومجرّبة الاستعادة</strong
-            ><span>{{ backupResult.folder }}</span
-            ><span
-              >{{ formatDate(backupResult.created_at) }} ·
-              {{ formatBytes(backupResult.dump_size) }}</span
-            >
+            <strong>تم إنشاء نسخة موثقة ومجرّبة الاستعادة</strong><span>{{ backupResult.folder }}</span><span>{{ formatDate(backupResult.created_at) }} ·
+              {{ formatBytes(backupResult.dump_size) }}</span>
           </div>
         </div>
         <div class="backup-actions">
@@ -226,8 +207,7 @@
             :disabled="!selectedDrive"
             :loading="backingUp"
             @click="createBackup"
-            >إنشاء النسخة والتحقق منها</v-btn
-          >
+          >إنشاء النسخة والتحقق منها</v-btn>
         </div>
       </section>
     </div>

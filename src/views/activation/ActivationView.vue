@@ -4,17 +4,17 @@
       <header class="activation-brand">
         <ClinicLogo :size="84" />
         <div>
-          <h1>تهيئة منظومة العيادة</h1>
+          <h1>{{ desktop.needsRuntimeAttention ? 'تعذر تشغيل منظومة العيادة' : 'تهيئة منظومة العيادة' }}</h1>
         </div>
       </header>
 
       <InlineError v-if="error" :message="error" />
 
-      <template v-if="desktop.activated && !desktop.ready">
+      <template v-if="desktop.needsRuntimeAttention">
         <div class="runtime-problem">
           <v-icon icon="mdi-database-alert-outline" size="44" />
           <div>
-            <h2>تعذر تشغيل الخدمات المحلية</h2>
+            <h2>{{ desktop.runtime.recovery_required ? 'يلزم استرداد إعدادات التشغيل' : 'تعذر تشغيل الخدمات المحلية' }}</h2>
             <p>
               {{
                 desktop.runtime.error ||
@@ -191,7 +191,9 @@ const selectedBackupRecord = computed(() =>
   desktop.backups.find((item) => item.id === selectedBackup.value),
 );
 
-onMounted(refreshDrives);
+onMounted(() => {
+  if (!desktop.needsRuntimeAttention) refreshDrives();
+});
 
 async function refreshDrives() {
   loadingDrives.value = true;

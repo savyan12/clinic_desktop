@@ -7,14 +7,12 @@
           to="/reports/sessions"
           variant="text"
           prepend-icon="mdi-file-chart-outline"
-          >التقارير</v-btn
-        >
+        >التقارير</v-btn>
         <v-btn
           color="primary"
           prepend-icon="mdi-plus"
           @click="sessionDialog = true"
-          >تسجيل جلسة</v-btn
-        >
+        >تسجيل جلسة</v-btn>
       </template>
     </PageHeader>
 
@@ -139,8 +137,7 @@
               variant="text"
               size="small"
               @click="clearFilters"
-              >مسح</v-btn
-            >
+            >مسح</v-btn>
           </div>
           <InlineError
             v-if="doctorError"
@@ -166,13 +163,11 @@
                   }}</router-link>
                   مع <strong>{{ session.doctor.name }}</strong>
                 </p>
-                <span
-                  >{{
-                    session.services.map((item) => item.name).join("، ") ||
+                <span>{{
+                  session.services.map((item) => item.name).join("، ") ||
                     "بدون خدمات"
-                  }}
-                  · <bdi dir="ltr">{{ session.patient.phone }}</bdi></span
-                >
+                }}
+                  · <bdi dir="ltr">{{ session.patient.phone }}</bdi></span>
               </div>
               <div class="activity-meta">
                 <time :datetime="session.opened_at">{{
@@ -186,13 +181,12 @@
                 </div>
               </div>
               <v-menu>
-                <template #activator="{ props }"
-                  ><v-btn
-                    v-bind="props"
-                    icon="mdi-dots-vertical"
-                    variant="text"
-                    size="small"
-                    aria-label="إجراءات الجلسة"
+                <template #activator="{ props }"><v-btn
+                  v-bind="props"
+                  icon="mdi-dots-vertical"
+                  variant="text"
+                  size="small"
+                  aria-label="إجراءات الجلسة"
                 /></template>
                 <v-list density="compact">
                   <v-list-item
@@ -241,15 +235,10 @@
               <span class="follow-up-avatar" aria-hidden="true">{{
                 subscription.patient.name.charAt(0)
               }}</span>
-              <span
-                ><strong>{{ subscription.patient.name }}</strong
-                ><small
-                  >{{ subscription.name }} ·
-                  {{
-                    subscription.services.map((item) => item.name).join(" + ")
-                  }}</small
-                ></span
-              >
+              <span><strong>{{ subscription.patient.name }}</strong><small>{{ subscription.name }} ·
+                {{
+                  subscription.services.map((item) => item.name).join(" + ")
+                }}</small></span>
               <em>متبقي {{ subscription.remaining }}</em>
             </router-link>
           </div>
@@ -275,18 +264,10 @@
             </div>
             <v-icon icon="mdi-finance" size="24" aria-hidden="true" />
           </div>
-          <router-link to="/reports/collections"
-            ><span>المقبوضات اليوم</span
-            ><MoneyText :value="dashboard.financial_summary.collections_today"
-          /></router-link>
-          <router-link to="/reports/debts"
-            ><span>الديون المتبقية</span
-            ><MoneyText :value="dashboard.financial_summary.debts_remaining"
-          /></router-link>
-          <router-link to="/reports/doctor-dues"
-            ><span>مستحقات الأطباء</span
-            ><MoneyText
-              :value="dashboard.financial_summary.doctor_dues_remaining"
+          <router-link to="/reports/collections"><span>المقبوضات اليوم</span><MoneyText :value="dashboard.financial_summary.collections_today" /></router-link>
+          <router-link to="/reports/debts"><span>الديون المتبقية</span><MoneyText :value="dashboard.financial_summary.debts_remaining" /></router-link>
+          <router-link to="/reports/doctor-dues"><span>مستحقات الأطباء</span><MoneyText
+            :value="dashboard.financial_summary.doctor_dues_remaining"
           /></router-link>
         </section>
 
@@ -305,10 +286,7 @@
               :key="movement.id"
             >
               <span class="movement-dot" aria-hidden="true" />
-              <span
-                ><strong>{{ paymentLabel(movement.type) }}</strong
-                ><small>{{ movement.patient?.name || "—" }}</small></span
-              >
+              <span><strong>{{ paymentLabel(movement.type) }}</strong><small>{{ movement.patient?.name || "—" }}</small></span>
               <MoneyText :value="movement.amount" />
             </div>
           </div>
@@ -360,7 +338,6 @@ const filters = reactive({
 });
 const statusItems = [
   { title: "مغلقة", value: "closed" },
-  { title: "ملغاة", value: "cancelled" },
   { title: "مفتوحة قديمة", value: "open" },
 ];
 
@@ -391,8 +368,13 @@ const primaryStats = computed(() => {
   const remaining = stats.filter((item) => !orderedKeys.has(item.key));
   return [...ordered, ...remaining].slice(0, 4);
 });
+const visibleTodaySessions = computed(() =>
+  (dashboard.value?.today_sessions || []).filter(
+    (session) => session.status !== "cancelled",
+  ),
+);
 const filteredSessions = computed(() =>
-  (dashboard.value?.today_sessions || []).filter((session) => {
+  visibleTodaySessions.value.filter((session) => {
     const query = filters.search.trim();
     return (
       (!query ||
@@ -404,23 +386,6 @@ const filteredSessions = computed(() =>
     );
   }),
 );
-const doctorSnapshots = computed(() => {
-  const counts = new Map();
-  for (const session of dashboard.value?.today_sessions || [])
-    counts.set(session.doctor_id, (counts.get(session.doctor_id) || 0) + 1);
-  const source = doctors.value.length
-    ? doctors.value
-    : (dashboard.value?.today_sessions || []).map((session) => session.doctor);
-  const unique = [
-    ...new Map(source.map((doctor) => [doctor.id, doctor])).values(),
-  ];
-  const max = Math.max(1, ...counts.values());
-  return unique.map((doctor) => ({
-    ...doctor,
-    count: counts.get(doctor.id) || 0,
-    progress: Math.round(((counts.get(doctor.id) || 0) / max) * 100),
-  }));
-});
 const hasActiveFilters = computed(() =>
   Boolean(filters.search || filters.doctor_id || filters.status),
 );

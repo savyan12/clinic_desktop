@@ -385,7 +385,8 @@ async fn sponsor_sessions(
 ) -> ApiResult<Vec<Value>> {
     let sessions = sqlx::query_as::<_, SessionRow>(
         "SELECT DISTINCT s.* FROM sessions s \
-         WHERE EXISTS ( \
+         WHERE s.status <> 'cancelled' \
+           AND EXISTS ( \
              SELECT 1 FROM debts d \
              WHERE d.sponsor_id = ? \
                AND (? IS NULL OR d.patient_id = ?) \

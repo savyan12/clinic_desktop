@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::fs::File;
 use std::path::PathBuf;
 use std::process::Child;
 use std::sync::{Arc, Mutex};
@@ -51,6 +52,10 @@ pub struct RuntimeProcessState {
     pub api_server: Option<ApiServerProcess>,
     pub ready: bool,
     pub last_error: Option<String>,
+    pub instance_lock: Option<File>,
+    pub recovery_required: bool,
+    pub recovery_notice: Option<String>,
+    pub mysql_managed: bool,
 }
 
 #[derive(Clone, Default)]
@@ -68,6 +73,8 @@ pub struct RuntimeInfo {
     pub mysql_port: u16,
     pub api_port: u16,
     pub error: Option<String>,
+    pub recovery_required: bool,
+    pub recovery_notice: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

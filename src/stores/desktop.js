@@ -14,6 +14,8 @@ export const useDesktopStore = defineStore('desktop', {
       activated: !isDesktopRuntime(),
       api_base_url: '/api/v1',
       error: null,
+      recovery_required: false,
+      recovery_notice: null,
     },
     drives: [],
     backups: [],
@@ -22,6 +24,7 @@ export const useDesktopStore = defineStore('desktop', {
     isDesktop: (state) => state.runtime.desktop,
     ready: (state) => state.runtime.ready,
     activated: (state) => state.runtime.activated,
+    needsRuntimeAttention: (state) => Boolean(state.runtime.recovery_required || state.runtime.error || (state.runtime.activated && !state.runtime.ready)),
   },
   actions: {
     applyRuntime(runtime) {
@@ -63,6 +66,9 @@ export const useDesktopStore = defineStore('desktop', {
         this.applyRuntime(await invokeDesktop('activate_new_installation', { request }))
         this.initialized = true
         return this.runtime
+      } catch (cause) {
+        await this.initialize(true)
+        throw cause
       } finally {
         this.loading = false
       }
@@ -73,6 +79,9 @@ export const useDesktopStore = defineStore('desktop', {
         this.applyRuntime(await invokeDesktop('activate_from_backup', { driveId, backupId }))
         this.initialized = true
         return this.runtime
+      } catch (cause) {
+        await this.initialize(true)
+        throw cause
       } finally {
         this.loading = false
       }
@@ -82,6 +91,9 @@ export const useDesktopStore = defineStore('desktop', {
       try {
         this.applyRuntime(await invokeDesktop('restart_local_runtime'))
         return this.runtime
+      } catch (cause) {
+        await this.initialize(true)
+        throw cause
       } finally {
         this.loading = false
       }

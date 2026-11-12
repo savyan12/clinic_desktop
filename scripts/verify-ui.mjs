@@ -71,6 +71,7 @@ try {
   const { applyTypographySettings } = await server.ssrLoadModule('/src/utils/typography.js')
   const { default: http } = await server.ssrLoadModule('/src/api/client.js')
   const { default: SessionDialog } = await server.ssrLoadModule('/src/components/sessions/NewSessionDialog.vue')
+  const { default: PatientDialog } = await server.ssrLoadModule('/src/components/patients/AddPatientDialog.vue')
   const { default: Autocomplete } = await server.ssrLoadModule('/src/components/common/PatientAutocomplete.vue')
   const patient = (id) => ({ id, name: `Patient ${id}`, phone: `090000${id}`, subscriptions: [], wallet_balance: '0.000', debt_total: '0.000' })
   const calls = []
@@ -260,6 +261,39 @@ try {
     const dialog = mount(SessionDialog, { modelValue: false })
     await flush()
     assert.equal(calls.length, before)
+    dialog.unmount()
+  })
+  await check('Patient dialog loads current values and saves edits with PATCH', async () => {
+    const current = {
+      id: 77,
+      name: 'مريض حالي',
+      phone: '0911111111',
+      age: 41,
+      gender: 'male',
+      area: 'طرابلس',
+      emergency_phone: '0922222222',
+      sponsor_id: 1,
+    }
+    let patchRequest = null
+    handle = async (config) => {
+      if (config.url === '/sponsors') return { data: [] }
+      if (config.url === `/patients/${current.id}` && config.method === 'patch') {
+        const data = typeof config.data === 'string' ? JSON.parse(config.data) : config.data
+        patchRequest = { ...config, data }
+        return { data: { ...current, ...data } }
+      }
+      return { data: [] }
+    }
+    const dialog = mount(PatientDialog, { modelValue: false, patient: current })
+    dialog.props.modelValue = true
+    await flush()
+    assert.equal(dialog.state.dialogTitle, 'تعديل بيانات المريض')
+    assert.equal(dialog.state.form.name, current.name)
+    assert.equal(dialog.state.form.sponsor_id, current.sponsor_id)
+    dialog.state.form.area = 'بن عاشور'
+    await dialog.state.save()
+    assert.equal(patchRequest?.url, `/patients/${current.id}`)
+    assert.equal(patchRequest?.data.area, 'بن عاشور')
     dialog.unmount()
   })
   await check('Changing patients cancels and ignores the previous account request', async () => {

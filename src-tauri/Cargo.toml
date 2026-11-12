@@ -1,6 +1,6 @@
 [package]
 name = "clinic-desktop"
-version = "1.0.0"
+version = "1.0.1"
 description = "Offline physiotherapy clinic management desktop application"
 authors = ["Ettizan Clinic"]
 edition = "2021"
@@ -36,6 +36,9 @@ tower-http = { version = "0.6", features = ["cors", "trace"] }
 ttf-parser = "0.25"
 unicode-bidi = "0.3"
 uuid = { version = "1.29.0", features = ["v4"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }
 
 [profile.release]
 codegen-units = 1

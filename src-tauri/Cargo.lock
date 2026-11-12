@@ -700,7 +700,7 @@ dependencies = [
 
 [[package]]
 name = "clinic-desktop"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "axum",
  "base64 0.23.1",
@@ -726,6 +726,7 @@ dependencies = [
  "ttf-parser 0.25.1",
  "unicode-bidi",
  "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

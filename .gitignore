@@ -25,6 +25,12 @@ release-artifacts/
 # Customer data, local installation secrets, and backup output
 install.json
 mysql-root.cnf
+# Atomic-write scratch files and archived corrupt configuration contain secrets too.
+install.json.corrupt-*
+install.tmp-*
+install.json.tmp-*
+mysql-root.tmp-*
+mysql-bootstrap.tmp-*
 *.sqlite
 *.sqlite3
 *.db

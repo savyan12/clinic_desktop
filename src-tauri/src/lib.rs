@@ -2,7 +2,9 @@ mod api;
 mod backup;
 mod drives;
 mod models;
+mod native_process;
 mod runtime;
+mod runtime_files;
 
 use models::{
     BackupRecord, BackupResult, DesktopState, NewActivationRequest, RemovableDrive, RuntimeInfo,
@@ -26,8 +28,10 @@ async fn activate_new_installation(
 }
 
 #[tauri::command]
-fn list_removable_drives() -> Result<Vec<RemovableDrive>, String> {
-    drives::list_removable_drives()
+async fn list_removable_drives() -> Result<Vec<RemovableDrive>, String> {
+    tauri::async_runtime::spawn_blocking(drives::list_removable_drives)
+        .await
+        .map_err(|error| format!("تعذر قراءة وحدات USB: {error}"))?
 }
 
 #[tauri::command]
@@ -63,10 +67,13 @@ async fn activate_from_backup(
 }
 
 #[tauri::command]
-async fn restart_local_runtime(state: State<'_, DesktopState>) -> Result<RuntimeInfo, String> {
+async fn restart_local_runtime(
+    app: AppHandle,
+    state: State<'_, DesktopState>,
+) -> Result<RuntimeInfo, String> {
     let state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        runtime::start_existing(&state)?;
+        runtime::retry_runtime(&app, &state)?;
         runtime::runtime_info(&state)
     })
     .await

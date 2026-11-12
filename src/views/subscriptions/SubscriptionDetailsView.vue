@@ -39,13 +39,12 @@
 
       <section class="surface-card">
         <h2 class="section-heading">سجل جلسات الاشتراك</h2>
-        <div v-if="subscription.sessions.length" class="session-list">
-          <div v-for="(session, index) in subscription.sessions" :key="session.id" class="session-row">
-            <div class="session-number">{{ subscription.sessions.length - index }}</div>
+        <div v-if="visibleSessions.length" class="session-list">
+          <div v-for="(session, index) in visibleSessions" :key="session.id" class="session-row">
+            <div class="session-number">{{ visibleSessions.length - index }}</div>
             <div class="session-main">
               <strong>{{ session.services.map((service) => service.name).join('، ') }}</strong>
               <span>{{ formatDateTime(session.closed_at || session.opened_at) }} · {{ session.doctor?.name || 'طبيب غير محدد' }}</span>
-              <span v-if="session.status === 'cancelled' && session.cancel_reason" class="cancel-reason">سبب الإلغاء: {{ session.cancel_reason }}</span>
             </div>
             <StatusChip type="session" :value="session.status" />
             <router-link :to="`/sessions/${session.id}`">التفاصيل</router-link>
@@ -119,6 +118,7 @@ const correctionDialog = ref(false)
 const correctionError = ref('')
 const correcting = ref(false)
 const correction = reactive({ sessions_count: '', total_price: '', reason: '' })
+const visibleSessions = computed(() => subscription.value?.sessions.filter((session) => session.status !== 'cancelled') || [])
 const usagePercent = computed(() => subscription.value?.sessions_count ? Math.min(100, (subscription.value.sessions_used / subscription.value.sessions_count) * 100) : 0)
 const statusDescription = computed(() => {
   if (subscription.value.status === 'active') return 'الاشتراك متاح ما دام يحتوي على جلسات متبقية.'

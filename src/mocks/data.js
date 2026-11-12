@@ -883,8 +883,36 @@ export function hydratePatient(patient) {
 }
 
 export function hydrateSession(session) {
+  const outstandingDebt = db.debts
+    .filter((item) => item.session_id === session.id && item.status !== "void")
+    .reduce(
+      (total, item) =>
+        total + Math.max(0, Number(item.amount) - Number(item.paid_amount)),
+      0,
+    );
+  const collectedRatio =
+    session.type === "individual" &&
+    session.status === "closed" &&
+    Number(session.net_total) > 0
+      ? Math.max(
+          0,
+          Math.min(
+            1,
+            (Number(session.net_total) - outstandingDebt) /
+              Number(session.net_total),
+          ),
+        )
+      : 1;
   return {
     ...session,
+    commission_base_amount:
+      session.commission_base_amount == null
+        ? null
+        : money(Number(session.commission_base_amount) * collectedRatio),
+    commission_amount:
+      session.commission_amount == null
+        ? null
+        : money(Number(session.commission_amount) * collectedRatio),
     patient: hydratePatient(
       db.patients.find((item) => item.id === session.patient_id),
     ),

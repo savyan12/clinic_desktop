@@ -41,7 +41,7 @@
         <ReportTable v-if="report.rows.length" :type="type" :rows="report.rows" />
         <EmptyState v-else icon="mdi-chart-box-outline" title="لا توجد نتائج للتقرير" description="غيّر الفترة أو الفلاتر ثم أعد المحاولة." />
       </section>
-      <p class="report-note">أُعد التقرير في {{ generatedAt }}. لا يوجد تقرير أرباح؛ الأرقام تفصل قيمة الخدمات والمقبوضات والديون ومستحقات الأطباء.</p>
+      <p class="report-note">أُعد التقرير في {{ generatedAt }}. محصّل الجلسات يشمل المدفوع والرصيد المستخدم فقط، بينما تظهر الديون وتسديداتها في تقاريرها المالية.</p>
     </template>
   </div>
 </template>
@@ -81,7 +81,7 @@ const filters = reactive({
   status: route.query.status || null,
   kind: route.query.kind || null,
 })
-const sessionStatuses = [{ title: 'مفتوحة', value: 'open' }, { title: 'مغلقة', value: 'closed' }, { title: 'ملغاة', value: 'cancelled' }]
+const sessionStatuses = [{ title: 'مفتوحة', value: 'open' }, { title: 'مغلقة', value: 'closed' }]
 const subscriptionStatuses = [{ title: 'نشط', value: 'active' }, { title: 'مكتمل', value: 'completed' }, { title: 'ملغي', value: 'cancelled' }]
 const debtStatuses = [{ title: 'مفتوح', value: 'open' }, { title: 'جزئي', value: 'partial' }, { title: 'مسدد', value: 'paid' }, { title: 'ملغى', value: 'void' }]
 const debtKinds = [{ title: 'جلسة', value: 'session' }, { title: 'اشتراك', value: 'subscription' }, { title: 'افتتاحي', value: 'opening' }]

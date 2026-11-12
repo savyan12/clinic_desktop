@@ -44,9 +44,15 @@ try {
   }), 'Duplicate phone warning')
 
   const patientResponse = await call('POST', '/patients', {
-    name: 'مريض اختبار الواجهة', phone: '0910000029', age: 32, gender: 'male', area: 'طرابلس', confirm_duplicate: false,
+    name: 'مريض اختبار الواجهة', phone: '0910000029', age: 32, gender: 'male', area: 'طرابلس', sponsor_id: 1, confirm_duplicate: false,
   })
   const patient = patientResponse.data
+  const updatedPatient = (await call('PATCH', `/patients/${patient.id}`, {
+    name: 'مريض اختبار الواجهة المعدل', phone: patient.phone, age: 33, gender: 'male', area: 'بن عاشور',
+    emergency_phone: '0920000029', sponsor_id: 1, confirm_duplicate: false,
+  })).data
+  assert(updatedPatient.name === 'مريض اختبار الواجهة المعدل' && updatedPatient.area === 'بن عاشور', 'Patient update did not persist the edited data')
+  Object.assign(patient, updatedPatient)
 
   const subscriptionResponse = await call('POST', '/subscriptions', {
     patient_id: patient.id,
@@ -112,12 +118,16 @@ try {
     settlement: { coverage: 'debt', wallet_amount: '0.000', paid_amount: '0.000', debt_amount: '45.000', method: 'cash', sponsor_id: 1 },
   })
   assert(debtSessionResponse.data.effects.debt?.amount === '45.000', 'Debt session did not create the debt')
+  assert(debtSessionResponse.data.session.commission_amount === '0.000', 'Unpaid debt created doctor commission')
 
   const mixedSessionResponse = await call('POST', '/sessions', {
     patient_id: patient.id, doctor_id: 3, type: 'individual', service_ids: [3], discount: '0.000',
     settlement: { coverage: 'mixed', wallet_amount: '20.000', paid_amount: '20.000', debt_amount: '25.000', method: 'transfer', sponsor_id: 1 },
   })
   assert(mixedSessionResponse.data.effects.payment && mixedSessionResponse.data.effects.wallet_transaction && mixedSessionResponse.data.effects.debt, 'Mixed session did not create all three effects')
+  const mixedCollected = Number(mixedSessionResponse.data.session.net_total) - Number(mixedSessionResponse.data.session.settlement.debt_amount)
+  const mixedExpectedCommission = mixedCollected * Number(mixedSessionResponse.data.session.commission_rate) / 100
+  assert(Math.abs(Number(mixedSessionResponse.data.session.commission_amount) - mixedExpectedCommission) < 0.0005, 'Mixed session commission included its unpaid debt')
 
   await expectStatus(403, () => call('PATCH', `/sessions/${cashSession.id}`, { doctor_id: 2 }), 'Receptionist closed-session edit denial')
 
@@ -126,6 +136,15 @@ try {
   assert(openDebts.length > 0, 'Expected debts were not visible in patient account')
   const subscriptionDebt = openDebts.find((debt) => debt.subscription_id === subscription.id)
   assert(subscriptionDebt, 'Subscription debt was not created')
+  const sessionDebt = openDebts.find((debt) => debt.session_id === debtSessionResponse.data.session.id)
+  assert(sessionDebt, 'Individual session debt was not created')
+  await call('POST', '/debts/settlements', {
+    amount: '10.000',
+    method: 'cash',
+    allocations: [{ debt_id: sessionDebt.id, amount: '10.000' }],
+  })
+  const debtSessionAfterPayment = (await call('GET', `/sessions/${debtSessionResponse.data.session.id}`)).data
+  assert(Math.abs(Number(debtSessionAfterPayment.commission_amount) - Number(debtSessionAfterPayment.commission_rate) / 10) < 0.0005, 'Debt payment did not release the proportional doctor commission')
   const allocationAmount = Math.min(30, Number(subscriptionDebt.remaining)).toFixed(3)
   await call('POST', '/debts/settlements', {
     amount: allocationAmount,
@@ -190,6 +209,20 @@ try {
   await call('POST', `/sessions/${secondSubscriptionSession.id}/cancel`, { reason: 'اختبار استعادة رصيد الاشتراك' })
   subscriptionDetails = (await call('GET', `/subscriptions/${subscription.id}`)).data
   assert(subscriptionDetails.sessions_used === 1 && subscriptionDetails.remaining === 2, 'Cancelling a subscription session did not restore exactly one allowance')
+  assert(!subscriptionDetails.sessions.some((item) => item.id === secondSubscriptionSession.id), 'Cancelled session remained visible in subscription details')
+  const sessionsAfterCancellation = await call('GET', '/sessions', undefined, { per_page: 100 })
+  assert(!sessionsAfterCancellation.data.some((item) => item.id === secondSubscriptionSession.id), 'Cancelled session remained visible in the sessions list')
+  const cancelledSessionFilter = await call('GET', '/sessions', undefined, { status: 'cancelled', per_page: 100 })
+  assert(cancelledSessionFilter.data.length === 0, 'Cancelled-session filter exposed hidden sessions')
+  const patientAfterCancellation = (await call('GET', `/patients/${patient.id}`)).data
+  assert(!patientAfterCancellation.sessions.some((item) => item.id === secondSubscriptionSession.id), 'Cancelled session remained visible in patient details')
+  const sponsorAfterCancellation = (await call('GET', '/sponsors/1')).data
+  assert(!sponsorAfterCancellation.sessions.some((item) => item.id === secondSubscriptionSession.id), 'Cancelled session remained visible in sponsor details')
+  const dashboardAfterCancellation = (await call('GET', '/dashboard')).data
+  assert(!dashboardAfterCancellation.today_sessions.some((item) => item.id === secondSubscriptionSession.id), 'Cancelled session remained visible on the dashboard')
+  const reportAfterCancellation = (await call('GET', '/reports/sessions', undefined, { status: 'cancelled' })).data
+  assert(reportAfterCancellation.rows.length === 0, 'Cancelled session remained visible in reports')
+  await expectStatus(404, () => call('GET', `/sessions/${secondSubscriptionSession.id}`), 'Cancelled session direct access')
 
   const correction = await call('POST', `/subscriptions/${subscription.id}/correct`, {
     changes: { sessions_count: 4, total_price: '320.000' }, reason: 'اختبار تصحيح عقد الاشتراك',
@@ -213,6 +246,14 @@ try {
     const response = await call('GET', `/reports/${report}`, undefined, {})
     assert(Array.isArray(response.data.rows), `Report ${report} did not return rows`)
   }
+  const sessionsReport = (await call('GET', '/reports/sessions', undefined, {})).data
+  const debtSessionReportRow = sessionsReport.rows.find((row) => row.id === debtSessionResponse.data.session.id)
+  const mixedSessionReportRow = sessionsReport.rows.find((row) => row.id === mixedSessionResponse.data.session.id)
+  assert(debtSessionReportRow?.collected_amount === '0.000', 'Debt session was included in session collected value')
+  assert(mixedSessionReportRow?.collected_amount === '40.000', 'Mixed session report included its debt amount')
+  const dashboard = (await call('GET', '/dashboard')).data
+  const dashboardCollected = dashboard.stats.find((item) => item.key === 'service_value_today')
+  assert(dashboardCollected?.value === sessionsReport.totals.service_value, 'Dashboard collected-session card differs from session report')
 
   const audit = await call('GET', '/audit-log', undefined, { per_page: 100 })
   assert(audit.data.some((entry) => entry.action === 'doctor_paid'), 'Payout was not written to audit log')

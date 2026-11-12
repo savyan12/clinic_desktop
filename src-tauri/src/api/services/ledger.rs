@@ -453,13 +453,7 @@ pub async fn doctor_payout(
         .fetch_optional(&mut **transaction)
         .await?
         .ok_or_else(ApiError::not_found)?;
-    let earned = sqlx::query_scalar::<_, Option<Decimal>>(
-        "SELECT SUM(commission_amount) FROM sessions WHERE doctor_id = ? AND type = 'individual' AND status = 'closed' AND commission_amount IS NOT NULL",
-    )
-    .bind(doctor_id)
-    .fetch_one(&mut **transaction)
-    .await?
-    .unwrap_or(Decimal::ZERO);
+    let earned = super::commissions::doctor_earned_transaction(transaction, doctor_id).await?;
     let paid = sqlx::query_scalar::<_, Option<Decimal>>(
         "SELECT SUM(amount) FROM doctor_payouts WHERE doctor_id = ?",
     )

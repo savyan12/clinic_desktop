@@ -1,8 +1,6 @@
 <template>
   <div class="page-container page-stack">
-    <template v-if="loading"
-      ><v-skeleton-loader type="heading, image, article"
-    /></template>
+    <template v-if="loading"><v-skeleton-loader type="heading, image, article" /></template>
     <InlineError v-else-if="error" :message="error" retry @retry="load" />
     <template v-else-if="session">
       <PageHeader
@@ -15,29 +13,25 @@
             color="primary"
             prepend-icon="mdi-plus-circle-outline"
             @click="additionDialog = true"
-            >إضافة خدمات</v-btn
-          >
+          >إضافة خدمات</v-btn>
           <v-btn
             :to="'/print/session/' + session.id"
             variant="outlined"
             prepend-icon="mdi-printer-outline"
-            >طباعة</v-btn
-          >
+          >طباعة</v-btn>
           <v-btn
             v-if="session.status === 'closed' && isAdmin"
             variant="outlined"
             prepend-icon="mdi-file-edit-outline"
             @click="openCorrection"
-            >تصحيح الجلسة</v-btn
-          >
+          >تصحيح الجلسة</v-btn>
           <v-btn
             v-if="session.status === 'closed' && isAdmin"
             color="error"
             variant="outlined"
             prepend-icon="mdi-cancel"
             @click="askCancel"
-            >إلغاء جلسة مغلقة</v-btn
-          >
+          >إلغاء جلسة مغلقة</v-btn>
         </template>
       </PageHeader>
 
@@ -45,53 +39,36 @@
         <StatusChip type="session" :value="session.status" />
         <span
           v-if="session.status === 'closed' && session.type === 'subscription'"
-          >سُجل حضور جلسة الاشتراك والطبيب المشرف دون إنشاء عمولة أو حركة مالية
-          مستقلة.</span
-        >
-        <span v-else-if="session.status === 'closed'"
-          >سُجلت الجلسة في النظام.</span
-        >
-        <span v-else-if="session.status === 'cancelled'"
-          >أُلغيت الجلسة: {{ session.cancel_reason }}</span
-        >
-        <span v-else
-          >هذه جلسة قديمة مفتوحة؛ لا يستطيع موظف الاستقبال تعديلها.</span
-        >
+        >سُجل حضور جلسة الاشتراك والطبيب المشرف دون إنشاء عمولة أو حركة مالية
+          مستقلة.</span>
+        <span v-else-if="session.status === 'closed'">سُجلت الجلسة في النظام.</span>
+        <span v-else-if="session.status === 'cancelled'">أُلغيت الجلسة: {{ session.cancel_reason }}</span>
+        <span v-else>هذه جلسة قديمة مفتوحة؛ لا يستطيع موظف الاستقبال تعديلها.</span>
       </div>
 
       <section class="detail-grid">
         <div class="detail-item">
-          <span class="detail-label">المريض</span
-          ><router-link :to="'/patients/' + session.patient.id"
-            ><strong>{{ session.patient.name }}</strong></router-link
-          ><span class="sub-value phone-value">{{
+          <span class="detail-label">المريض</span><router-link :to="'/patients/' + session.patient.id"><strong>{{ session.patient.name }}</strong></router-link><span class="sub-value phone-value">{{
             session.patient.phone
           }}</span>
         </div>
         <div class="detail-item">
           <span class="detail-label">{{
             session.type === "subscription" ? "الطبيب المشرف" : "الطبيب المسؤول"
-          }}</span
-          ><strong>{{ session.doctor.name }}</strong
-          ><span class="sub-value">{{
+          }}</span><strong>{{ session.doctor.name }}</strong><span class="sub-value">{{
             session.type === "subscription"
               ? "إشراف تشغيلي دون عمولة"
               : `نسبة محفوظة ${session.commission_rate || 0}%`
           }}</span>
         </div>
         <div class="detail-item">
-          <span class="detail-label">نوع الجلسة</span
-          ><strong>{{ labelFor("sessionType", session.type) }}</strong
-          ><router-link
+          <span class="detail-label">نوع الجلسة</span><strong>{{ labelFor("sessionType", session.type) }}</strong><router-link
             v-if="session.subscription_id"
             :to="'/subscriptions/' + session.subscription_id"
-            >عرض الاشتراك</router-link
-          >
+          >عرض الاشتراك</router-link>
         </div>
         <div class="detail-item">
-          <span class="detail-label">سجلها</span
-          ><strong>{{ session.created_by_user?.name }}</strong
-          ><span class="sub-value">{{ formatDate(session.opened_at) }}</span>
+          <span class="detail-label">سجلها</span><strong>{{ session.created_by_user?.name }}</strong><span class="sub-value">{{ formatDate(session.opened_at) }}</span>
         </div>
       </section>
 
@@ -105,26 +82,19 @@
             <div v-for="service in session.services" :key="service.id">
               <div class="service-description">
                 <strong>{{ service.name }}</strong>
-                <span v-if="service.item_type === 'extra_units'"
-                  >ملحقات فقط: {{ service.extra_units }}
-                  {{ service.unit_name || "وحدة" }}</span
-                >
-                <span v-else-if="service.included_units || service.extra_units"
-                  >يشمل {{ service.included_units }} + إضافي
+                <span v-if="service.item_type === 'extra_units'">ملحقات فقط: {{ service.extra_units }}
+                  {{ service.unit_name || "وحدة" }}</span>
+                <span v-else-if="service.included_units || service.extra_units">يشمل {{ service.included_units }} + إضافي
                   {{ service.extra_units }}
-                  {{ service.unit_name || "وحدة" }}</span
-                >
-                <span v-if="service.is_addition" class="addition-label"
-                  >مضافة بعد إغلاق الجلسة</span
-                >
+                  {{ service.unit_name || "وحدة" }}</span>
+                <span v-if="service.is_addition" class="addition-label">مضافة بعد إغلاق الجلسة</span>
               </div>
               <MoneyText :value="service.price" />
             </div>
           </div>
           <div class="totals-list">
             <div>
-              <span>إجمالي الخدمات</span
-              ><MoneyText :value="session.services_total" />
+              <span>إجمالي الخدمات</span><MoneyText :value="session.services_total" />
             </div>
             <div><span>الخصم</span><MoneyText :value="session.discount" /></div>
             <div class="net">
@@ -142,39 +112,33 @@
           </div>
           <div class="totals-list settlement-list">
             <div>
-              <span>من الرصيد</span
-              ><MoneyText :value="session.settlement.wallet_amount" />
+              <span>من الرصيد</span><MoneyText :value="session.settlement.wallet_amount" />
             </div>
             <div>
-              <span>مدفوع</span
-              ><MoneyText :value="session.settlement.paid_amount" />
+              <span>مدفوع</span><MoneyText :value="session.settlement.paid_amount" />
             </div>
             <div>
-              <span>دين</span
-              ><MoneyText :value="session.settlement.debt_amount" />
+              <span>دين</span><MoneyText :value="session.settlement.debt_amount" />
             </div>
           </div>
           <div
             v-if="session.status === 'closed' && session.type === 'individual'"
             class="commission-box"
           >
-            <span>مستحق الطبيب من هذه الجلسة</span
-            ><MoneyText :value="session.commission_amount" />
+            <span>مستحق الطبيب من هذه الجلسة</span><MoneyText :value="session.commission_amount" />
           </div>
           <div
             v-else-if="
               session.status === 'closed' &&
-              session.type === 'subscription' &&
-              session.commission_amount != null
+                session.type === 'subscription' &&
+                session.commission_amount != null
             "
             class="commission-box historical"
           >
-            <span>عمولة تاريخية محفوظة قبل تغيير السياسة</span
-            ><MoneyText :value="session.commission_amount" />
+            <span>عمولة تاريخية محفوظة قبل تغيير السياسة</span><MoneyText :value="session.commission_amount" />
           </div>
           <div v-if="session.additions?.length" class="addition-summary">
-            <strong>إضافات مثبتة: {{ session.additions.length }}</strong
-            ><span>كل إضافة محفوظة كسجل مستقل مع تسويتها.</span>
+            <strong>إضافات مثبتة: {{ session.additions.length }}</strong><span>كل إضافة محفوظة كسجل مستقل مع تسويتها.</span>
           </div>
         </div>
       </section>
@@ -185,39 +149,30 @@
           <div>
             <span class="timeline-dot"></span>
             <div>
-              <strong>سُجلت الجلسة</strong
-              ><small
-                >{{ formatDate(session.opened_at) }} ·
-                {{ session.created_by_user?.name }}</small
-              >
+              <strong>سُجلت الجلسة</strong><small>{{ formatDate(session.opened_at) }} ·
+                {{ session.created_by_user?.name }}</small>
             </div>
           </div>
           <div v-if="session.closed_at">
             <span class="timeline-dot success"></span>
             <div>
-              <strong>أُغلقت مباشرة</strong
-              ><small
-                >{{ formatDate(session.closed_at) }} ·
+              <strong>أُغلقت مباشرة</strong><small>{{ formatDate(session.closed_at) }} ·
                 {{
                   session.closed_by_user?.name || session.created_by_user?.name
-                }}</small
-              >
+                }}</small>
             </div>
           </div>
           <div v-for="addition in session.additions" :key="addition.id">
             <span class="timeline-dot addition"></span>
             <div>
-              <strong
-                >أضيفت خدمات بقيمة
-                <MoneyText :value="addition.net_total" /></strong
-              ><small>{{ formatDate(addition.created_at) }}</small>
+              <strong>أضيفت خدمات بقيمة
+                <MoneyText :value="addition.net_total" /></strong><small>{{ formatDate(addition.created_at) }}</small>
             </div>
           </div>
           <div v-if="session.cancelled_at">
             <span class="timeline-dot danger"></span>
             <div>
-              <strong>أُلغيت الجلسة</strong
-              ><small>{{ session.cancel_reason }}</small>
+              <strong>أُلغيت الجلسة</strong><small>{{ session.cancel_reason }}</small>
             </div>
           </div>
         </div>
@@ -318,39 +273,33 @@
           rows="3"
         />
         <div v-if="session?.type === 'individual'" class="impact-preview">
-          <span>صافي قديم <MoneyText :value="session?.net_total" /></span
-          ><span>صافي جديد <MoneyText :value="correctedNet" /></span
-          ><span>دين جديد <MoneyText :value="correctionDebtAmount" /></span>
+          <span>صافي قديم <MoneyText :value="session?.net_total" /></span><span>صافي جديد <MoneyText :value="correctedNet" /></span><span>دين جديد <MoneyText :value="correctionDebtAmount" /></span>
         </div>
         <div v-else class="subscription-correction-note">
           تصحيح جلسة الاشتراك يغيّر الطبيب المشرف فقط، ولا ينشئ أو يعدّل أي
           عمولة.
         </div>
       </v-card-text>
-      <v-card-actions class="dialog-actions"
-        ><v-btn
-          variant="text"
-          :disabled="correcting"
-          @click="correctionDialog = false"
-          >تراجع</v-btn
-        ><v-btn
-          color="primary"
-          data-form-flow-primary
-          :loading="correcting"
-          :disabled="
-            correctionOverAllocated || loadingOptions || Boolean(optionsError)
-          "
-          @click="applyCorrection"
-          >تأكيد التصحيح</v-btn
-        ></v-card-actions
-      >
+      <v-card-actions class="dialog-actions"><v-btn
+        variant="text"
+        :disabled="correcting"
+        @click="correctionDialog = false"
+      >تراجع</v-btn><v-btn
+        color="primary"
+        data-form-flow-primary
+        :loading="correcting"
+        :disabled="
+          correctionOverAllocated || loadingOptions || Boolean(optionsError)
+        "
+        @click="applyCorrection"
+      >تأكيد التصحيح</v-btn></v-card-actions>
     </v-card>
   </v-dialog>
 </template>
 
 <script setup>
 import { computed, onMounted, reactive, ref } from "vue";
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { getDoctorOptions } from "@/api/doctors";
 import { getSponsorOptions } from "@/api/sponsors";
 import { useDialogOptions } from "@/composables/useDialogOptions";
@@ -368,6 +317,7 @@ import { usePermissions } from "@/composables/usePermissions";
 import { useUiStore } from "@/stores/ui";
 
 const route = useRoute();
+const router = useRouter();
 const ui = useUiStore();
 const { isAdmin } = usePermissions();
 const { key, reset } = useIdempotency();
@@ -472,7 +422,7 @@ async function executeCancel(reason) {
     await cancelSession(session.value.id, { reason }, key.value);
     ui.showSnackbar("تم إلغاء الجلسة وإنشاء الحركات العكسية وتوثيق السبب.");
     confirm.open = false;
-    await load();
+    await router.replace('/sessions');
   } catch (apiError) {
     ui.showSnackbar(apiError.message, "error");
   } finally {

@@ -1,9 +1,10 @@
-use crate::models::RemovableDrive;
 #[cfg(target_os = "windows")]
 use crate::runtime;
+use crate::{models::RemovableDrive, native_process};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::Duration;
 
 pub fn list_removable_drives() -> Result<Vec<RemovableDrive>, String> {
     #[cfg(target_os = "windows")]
@@ -55,7 +56,7 @@ fn list_windows_drives() -> Result<Vec<RemovableDrive>, String> {
     );
     let mut command = Command::new("powershell.exe");
     runtime::hide_console_window(&mut command);
-    let output = command
+    command
         .args([
             "-NoLogo",
             "-NoProfile",
@@ -63,8 +64,10 @@ fn list_windows_drives() -> Result<Vec<RemovableDrive>, String> {
             "-Command",
             script,
         ])
-        .output()
-        .map_err(|error| format!("تعذر قراءة وحدات USB: {error}"))?;
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let output = native_process::output(&mut command, Duration::from_secs(20), "قراءة وحدات USB")?;
 
     if !output.status.success() {
         return Err("تعذر قراءة وحدات USB من Windows.".to_string());
@@ -107,15 +110,19 @@ fn list_windows_drives() -> Result<Vec<RemovableDrive>, String> {
 
 #[cfg(not(target_os = "windows"))]
 fn list_unix_drives() -> Result<Vec<RemovableDrive>, String> {
-    let output = Command::new("lsblk")
+    let mut command = Command::new("lsblk");
+    command
         .args([
             "--json",
             "--bytes",
             "--output",
             "NAME,PATH,LABEL,RM,TRAN,MOUNTPOINTS,FSAVAIL",
         ])
-        .output()
-        .map_err(|error| format!("تعذر قراءة وحدات التخزين: {error}"))?;
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let output =
+        native_process::output(&mut command, Duration::from_secs(20), "قراءة وحدات التخزين")?;
 
     if !output.status.success() {
         return Err("تعذر قراءة وحدات التخزين القابلة للإزالة.".to_string());

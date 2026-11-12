@@ -6,6 +6,7 @@
       <PageHeader :title="patient.name">
         <template #subtitle>ملف المريض · <bdi class="phone-value" dir="ltr">{{ patient.phone || '—' }}</bdi></template>
         <template #actions>
+          <v-btn variant="outlined" prepend-icon="mdi-pencil-outline" @click="editPatientDialog = true">تعديل البيانات</v-btn>
           <v-btn color="primary" prepend-icon="mdi-plus" @click="sessionDialog = true">فتح جلسة</v-btn>
           <v-btn variant="outlined" prepend-icon="mdi-wallet-membership" @click="subscriptionDialog = true">اشتراك جديد</v-btn>
           <v-btn :to="`/print/statement/patient/${patient.id}`" variant="outlined" prepend-icon="mdi-printer-outline">كشف الحساب</v-btn>
@@ -15,7 +16,7 @@
       <section class="patient-identity surface-card">
         <div class="patient-avatar">{{ patient.name.charAt(0) }}</div>
         <div class="identity-main"><h2>{{ patient.name }}</h2><span class="phone-value">{{ patient.phone }}</span></div>
-        <div><span>العمر</span><strong>{{ patient.age }} سنة</strong></div>
+        <div><span>العمر</span><strong>{{ patient.age != null ? patient.age + ' سنة' : '—' }}</strong></div>
         <div><span>الجنس</span><strong>{{ labelFor('gender', patient.gender) }}</strong></div>
         <div><span>المنطقة</span><strong>{{ patient.area || '—' }}</strong></div>
         <div><span>الجهة الراعية</span><strong>{{ patient.sponsor?.name || 'لا توجد' }}</strong></div>
@@ -35,7 +36,7 @@
             <div class="detail-grid">
               <div class="detail-item"><span class="detail-label">الاسم الكامل</span><strong>{{ patient.name }}</strong></div>
               <div class="detail-item"><span class="detail-label">رقم الهاتف</span><strong class="phone-value">{{ patient.phone }}</strong></div>
-              <div class="detail-item"><span class="detail-label">العمر</span><strong>{{ patient.age }} سنة</strong></div>
+              <div class="detail-item"><span class="detail-label">العمر</span><strong>{{ patient.age != null ? patient.age + ' سنة' : '—' }}</strong></div>
               <div class="detail-item"><span class="detail-label">الجنس</span><strong>{{ labelFor('gender', patient.gender) }}</strong></div>
               <div class="detail-item"><span class="detail-label">العنوان</span><strong>{{ patient.area || '—' }}</strong></div>
               <div class="detail-item"><span class="detail-label">هاتف الطوارئ</span><strong class="phone-value">{{ patient.emergency_phone || '—' }}</strong></div>
@@ -48,7 +49,7 @@
         <v-window-item value="sessions">
           <section class="surface-card tab-panel">
             <div class="section-row"><h2 class="section-heading">سجل الجلسات</h2><v-btn color="primary" variant="text" prepend-icon="mdi-plus" @click="sessionDialog = true">فتح جلسة</v-btn></div>
-            <div v-if="patient.sessions.length" class="table-scroll"><v-table><thead><tr><th>التاريخ</th><th>الطبيب</th><th>الخدمات</th><th>القيمة</th><th>التسوية</th><th>الحالة</th><th></th></tr></thead><tbody><tr v-for="item in patient.sessions" :key="item.id"><td>{{ formatDateTime(item.opened_at) }}</td><td>{{ item.doctor.name }}</td><td>{{ item.services.map((service) => service.name).join('، ') }}</td><td><MoneyText :value="item.net_total" /></td><td><StatusChip type="coverage" :value="item.settlement.coverage" /></td><td><StatusChip type="session" :value="item.status" /></td><td><v-btn :to="`/sessions/${item.id}`" variant="text">فتح</v-btn></td></tr></tbody></v-table></div>
+            <div v-if="visibleSessions.length" class="table-scroll"><v-table><thead><tr><th>التاريخ</th><th>الطبيب</th><th>الخدمات</th><th>القيمة</th><th>التسوية</th><th>الحالة</th><th></th></tr></thead><tbody><tr v-for="item in visibleSessions" :key="item.id"><td>{{ formatDateTime(item.opened_at) }}</td><td>{{ item.doctor.name }}</td><td>{{ item.services.map((service) => service.name).join('، ') }}</td><td><MoneyText :value="item.net_total" /></td><td><StatusChip type="coverage" :value="item.settlement.coverage" /></td><td><StatusChip type="session" :value="item.status" /></td><td><v-btn :to="`/sessions/${item.id}`" variant="text">فتح</v-btn></td></tr></tbody></v-table></div>
             <EmptyState v-else icon="mdi-clipboard-outline" title="لا توجد جلسات" description="لم تُسجل جلسات لهذا المريض بعد." />
           </section>
         </v-window-item>
@@ -103,6 +104,7 @@
     </template>
   </div>
 
+  <AddPatientDialog v-if="patient" v-model="editPatientDialog" :patient="patient" @saved="load" />
   <NewSessionDialog v-if="patient" v-model="sessionDialog" :initial-patient-id="patient.id" :initial-patient="patient" @saved="load" />
   <CreateSubscriptionDialog v-if="patient" v-model="subscriptionDialog" :initial-patient-id="patient.id" :initial-patient="patient" @saved="load" />
   <TopUpWalletDialog v-if="patient" v-model="topUpDialog" :patient-id="patient.id" :current-balance="patient.wallet_balance" @saved="load" />
@@ -120,6 +122,7 @@ import InlineError from '@/components/common/InlineError.vue'
 import MoneyText from '@/components/common/MoneyText.vue'
 import PageHeader from '@/components/common/PageHeader.vue'
 import StatusChip from '@/components/common/StatusChip.vue'
+import AddPatientDialog from '@/components/patients/AddPatientDialog.vue'
 import DebtSettlementDialog from '@/components/financial/DebtSettlementDialog.vue'
 import OpeningDebtDialog from '@/components/financial/OpeningDebtDialog.vue'
 import RefundDialog from '@/components/financial/RefundDialog.vue'
@@ -131,7 +134,8 @@ import { usePermissions } from '@/composables/usePermissions'
 
 const route = useRoute(); const { isAdmin } = usePermissions()
 const patient = ref(null); const loading = ref(true); const error = ref(''); const tab = ref('details')
-const sessionDialog = ref(false); const subscriptionDialog = ref(false); const topUpDialog = ref(false); const settlementDialog = ref(false); const refundDialog = ref(false); const openingDebtDialog = ref(false)
+const editPatientDialog = ref(false); const sessionDialog = ref(false); const subscriptionDialog = ref(false); const topUpDialog = ref(false); const settlementDialog = ref(false); const refundDialog = ref(false); const openingDebtDialog = ref(false)
+const visibleSessions = computed(() => patient.value?.sessions.filter((item) => item.status !== 'cancelled') || [])
 const openDebts = computed(() => patient.value?.debts.filter((item) => ['open', 'partial'].includes(item.status)) || [])
 const refundablePayments = computed(() => {
   const payments = patient.value?.payments || []

@@ -131,7 +131,7 @@ pub async fn show(
     let mut value = summary(&state, &patient).await?;
 
     let sessions = sqlx::query_as::<_, SessionRow>(
-        "SELECT * FROM sessions WHERE patient_id = ? ORDER BY opened_at DESC",
+        "SELECT * FROM sessions WHERE patient_id = ? AND status <> 'cancelled' ORDER BY opened_at DESC",
     )
     .bind(id)
     .fetch_all(&state.pool)
@@ -361,7 +361,7 @@ async fn ensure_phone(
             "يوجد مريض مسجل برقم الهاتف نفسه. أكد الحفظ إذا كان هذا سجلًا مختلفًا.",
         )
         .field("phone", "رقم الهاتف مستخدم في سجل آخر.")
-        .field("confirm_duplicate", "يلزم تأكيد إنشاء سجل مكرر."));
+        .field("confirm_duplicate", "يلزم تأكيد حفظ سجل مكرر."));
     }
     Ok(())
 }

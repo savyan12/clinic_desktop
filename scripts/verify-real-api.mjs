@@ -247,10 +247,16 @@ const walletSession = await createSession(receptionistToken, patient.id, doctor.
 const debtSession = await createSession(receptionistToken, patient.id, doctor.id, [services[2].id], {
   coverage: 'debt', wallet_amount: '0.000', paid_amount: '0.000', debt_amount: '80.000', method: null, sponsor_id: sponsor.id,
 })
+assertMoney(debtSession.commission_amount, 0, 'Unpaid debt doctor commission')
 
 const mixedSession = await createSession(receptionistToken, patient.id, doctor.id, [services[0].id, services[1].id], {
   coverage: 'mixed', wallet_amount: '20.000', paid_amount: '30.000', debt_amount: '50.000', method: 'transfer', sponsor_id: sponsor.id,
 })
+assertMoney(
+  mixedSession.commission_amount,
+  (Number(mixedSession.net_total) - Number(mixedSession.settlement.debt_amount)) * Number(mixedSession.commission_rate) / 100,
+  'Mixed session collected-value commission',
+)
 process.stdout.write('PASS 4 cash, wallet, insufficient-wallet, sponsor debt, and mixed settlement\n')
 
 const oldPriceSession = await createSession(receptionistToken, patient.id, doctor.id, [services[3].id], {
@@ -337,6 +343,18 @@ const settlement = await request('POST', '/debts/settlements', {
   },
 })
 assert(settlement.data.allocations.length === 2, 'Debt payment did not split across two debts')
+const debtSessionAfterSettlement = await request('GET', `/sessions/${debtSession.id}`, { token: adminToken })
+const mixedSessionAfterSettlement = await request('GET', `/sessions/${mixedSession.id}`, { token: adminToken })
+assertMoney(
+  debtSessionAfterSettlement.data.commission_amount,
+  Number(debtSession.commission_amount) + Number(debtSession.commission_rate) / 100,
+  'Debt settlement released doctor commission',
+)
+assertMoney(
+  mixedSessionAfterSettlement.data.commission_amount,
+  Number(mixedSession.commission_amount) + Number(mixedSession.commission_rate) / 100,
+  'Mixed debt settlement released doctor commission',
+)
 const refreshedDebts = await request('GET', `/patients/${patient.id}/debts`, { token: receptionistToken, params: { per_page: 100 } })
 const overTarget = refreshedDebts.data.find((debt) => debt.id === targetDebts[0].id)
 const excessive = decimal(Number(overTarget.remaining) + 1)
@@ -419,6 +437,15 @@ const debtsReport = await request('GET', '/reports/debts', { token: adminToken }
 const doctorDuesReport = await request('GET', '/reports/doctor-dues', { token: adminToken })
 const stats = Object.fromEntries(dashboard.data.stats.map((stat) => [stat.key, stat.value]))
 assertMoney(stats.service_value_today, sessionsToday.data.totals.service_value, 'Dashboard service-value drill-down')
+const debtSessionReportRow = sessionsToday.data.rows.find((row) => row.id === debtSession.id)
+const mixedSessionReportRow = sessionsToday.data.rows.find((row) => row.id === mixedSession.id)
+assertMoney(debtSessionReportRow?.collected_amount, 0, 'Debt session report collected value')
+assertMoney(mixedSessionReportRow?.collected_amount, 50, 'Mixed session report collected value')
+assertMoney(
+  sessionsToday.data.totals.service_value,
+  sessionsToday.data.rows.reduce((total, row) => total + Number(row.collected_amount || 0), 0),
+  'Session report collected total',
+)
 assertMoney(stats.collections_today, collectionsToday.data.totals.net, 'Dashboard collections drill-down')
 assertMoney(stats.debts_remaining, debtsReport.data.totals.remaining, 'Dashboard debt drill-down')
 assertMoney(stats.doctor_dues_remaining, doctorDuesReport.data.totals.remaining, 'Dashboard doctor-dues drill-down')

@@ -22,19 +22,19 @@ export const reportTypes = [
   {
     value: 'sessions',
     title: 'تقرير الجلسات',
-    description: 'الجلسات والخدمات والأطباء وقيم الخدمات خلال الفترة.',
+    description: 'الجلسات والخدمات والأطباء والمبالغ المحصلة دون احتساب الديون.',
     icon: 'mdi-clipboard-pulse-outline',
     columns: [
       { key: 'opened_at', label: 'التاريخ', kind: 'date', width: 15 },
       { key: 'patient', label: 'المريض', value: (row) => nameOf(row.patient), width: 17 },
       { key: 'doctor', label: 'الطبيب', value: (row) => nameOf(row.doctor), width: 15 },
       { key: 'services', label: 'الخدمات', value: serviceNames, width: 25 },
-      { key: 'net_total', label: 'القيمة', kind: 'money', width: 15 },
+      { key: 'collected_amount', label: 'المحصل', kind: 'money', width: 15 },
       { key: 'status', label: 'الحالة', kind: 'status', statusType: 'session', width: 13 },
     ],
     totals: [
       { key: 'count', label: 'عدد الجلسات' },
-      { key: 'service_value', label: 'قيمة الخدمات', money: true },
+      { key: 'service_value', label: 'إجمالي المحصل من الجلسات', money: true },
     ],
   },
   {

@@ -5,6 +5,7 @@ use crate::{
         RuntimeExecutables, RuntimeInfo, RuntimePaths,
     },
 };
+use crate::{native_process, runtime_files};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use bcrypt::{hash, DEFAULT_COST};
 use sha2::{Digest, Sha256};
@@ -43,15 +44,12 @@ pub(crate) fn hide_console_window(command: &mut Command) {
 }
 
 pub fn initialize(app: &AppHandle, state: &DesktopState) -> Result<(), String> {
+    let _operation = state
+        .operation_lock
+        .lock()
+        .map_err(|_| "تعذر بدء تشغيل النظام المحلي.".to_string())?;
     let paths = resolve_paths(app)?;
-    let config = match load_config(&paths.config_file)? {
-        Some(config) => config,
-        None => {
-            let config = default_config();
-            save_config(&paths.config_file, &config)?;
-            config
-        }
-    };
+    let config = prepare_install_config(state, &paths)?;
 
     {
         let mut inner = state
@@ -71,14 +69,153 @@ pub fn initialize(app: &AppHandle, state: &DesktopState) -> Result<(), String> {
         .map_err(|_| "تعذر الوصول إلى حالة التطبيق المحلي.".to_string())?
         .executables = Some(executables);
 
+    start_prepared_runtime(state)
+}
+
+fn start_prepared_runtime(state: &DesktopState) -> Result<(), String> {
+    let prepared = context(state)?;
+    let config = &prepared.config;
     if config.activated {
-        if let Err(error) = start_existing(state) {
-            record_runtime_error(state, &error);
+        ensure_mysql_running(state)?;
+        start_rust_api(state)?;
+    } else if mysql_data_exists(&prepared.paths.mysql_data_dir)? {
+        // A crash during activation may have committed the users before its flag.
+        let context = ensure_mysql_running(state)?;
+        let output = mysql_output(&context, &[
+            "--batch".into(), "--skip-column-names".into(), "-e".into(),
+            format!("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='{}' AND table_name='users'", escape_sql_string(&config.database)),
+        ])?;
+        if parse_mysql_count(&output.stdout)? > 0 {
+            let output = mysql_output(
+                &context,
+                &[
+                    "--batch".into(),
+                    "--skip-column-names".into(),
+                    "-e".into(),
+                    format!(
+                        "SELECT COUNT(*) FROM {}.users",
+                        quote_identifier(&config.database)
+                    ),
+                ],
+            )?;
+            if parse_mysql_count(&output.stdout)? > 0 {
+                migrate_database(&context, &config.database, true)?;
+                validate_restored_database(&context, &config.database)?;
+                mark_activated_and_start_api(state)?;
+                return Ok(());
+            }
+        }
+        let api_config = database_api_config(&context, &config.database, true);
+        let empty = run_async_operation(
+            async move {
+                let pool = api::db::connect(&api_config).await?;
+                let result = ensure_no_existing_rows(&pool).await;
+                pool.close().await;
+                result
+            },
+            "انتهت مهلة فحص بيانات التثبيت الموجود.",
+        );
+        if let Err(error) = empty {
+            state
+                .inner
+                .lock()
+                .map_err(|_| "تعذر الوصول لحالة النظام.".to_string())?
+                .recovery_required = true;
             return Err(error);
         }
     }
 
     Ok(())
+}
+
+fn prepare_install_config(
+    state: &DesktopState,
+    paths: &RuntimePaths,
+) -> Result<InstallConfig, String> {
+    {
+        let mut inner = state
+            .inner
+            .lock()
+            .map_err(|_| "تعذر الوصول لحالة النظام.".to_string())?;
+        inner.paths = Some(paths.clone());
+        inner.ready = false;
+        if inner.instance_lock.is_none() {
+            inner.instance_lock = Some(runtime_files::acquire_instance_lock(&paths.runtime_dir)?);
+        }
+    }
+    if paths.runtime_dir.join("RECOVERY_REQUIRED").exists() {
+        state
+            .inner
+            .lock()
+            .map_err(|_| "تعذر الوصول لحالة النظام.".to_string())?
+            .recovery_required = true;
+        return Err("استعادة سابقة لم تكتمل بأمان. احتفظ بالنسخة الاحتياطية ومجلد restore-work؛ يلزم أن يتحقق المسؤول من البيانات قبل تشغيل النظام.".into());
+    }
+    let loaded = runtime_files::load_config(&paths.config_file).and_then(|loaded| {
+        if loaded.is_none() && mysql_data_exists(&paths.mysql_data_dir)? {
+            return Err("ملفات التشغيل مفقودة مع وجود بيانات MySQL. بيانات العيادة محفوظة؛ يلزم استرداد إعدادات التشغيل بواسطة المسؤول.".into());
+        }
+        Ok(loaded)
+    });
+    let loaded = match loaded {
+        Ok(loaded) => loaded,
+        Err(error) => {
+            state
+                .inner
+                .lock()
+                .map_err(|_| "تعذر الوصول لحالة النظام.".to_string())?
+                .recovery_required = true;
+            return Err(error);
+        }
+    };
+    let (config, recovered) = match loaded {
+        Some(loaded) => (loaded.config, loaded.recovered),
+        None => {
+            let config = default_config();
+            save_config(&paths.config_file, &config)?;
+            (config, false)
+        }
+    };
+    let mut inner = state
+        .inner
+        .lock()
+        .map_err(|_| "تعذر الوصول لحالة النظام.".to_string())?;
+    inner.recovery_required = false;
+    inner.recovery_notice = recovered.then(|| "استُعيدت إعدادات التشغيل من النسخة السليمة. أنشئ نسخة احتياطية حديثة بعد التحقق من البيانات.".into());
+    Ok(config)
+}
+
+fn mysql_data_exists(directory: &Path) -> Result<bool, String> {
+    match fs::read_dir(directory) {
+        Ok(mut entries) => entries
+            .next()
+            .transpose()
+            .map(|entry| entry.is_some())
+            .map_err(|error| format!("تعذر فحص بيانات MySQL الموجودة: {error}")),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(format!("تعذر فحص بيانات MySQL الموجودة: {error}")),
+    }
+}
+
+pub fn retry_runtime(app: &AppHandle, state: &DesktopState) -> Result<(), String> {
+    let reinitialize = {
+        let inner = state
+            .inner
+            .lock()
+            .map_err(|_| "تعذر الوصول لحالة النظام.".to_string())?;
+        inner.config.as_ref().is_none_or(|config| !config.activated)
+            || inner.instance_lock.is_none()
+            || inner.recovery_required
+    };
+    let result = if reinitialize {
+        initialize(app, state)
+    } else {
+        start_existing(state)
+    };
+    if let Err(error) = &result {
+        record_runtime_error(state, error);
+    }
+    result
 }
 
 pub fn runtime_info(state: &DesktopState) -> Result<RuntimeInfo, String> {
@@ -97,8 +234,14 @@ pub fn runtime_info(state: &DesktopState) -> Result<RuntimeInfo, String> {
             inner.last_error =
                 Some("توقفت خدمة Rust المحلية. أعد تشغيلها من شاشة التفعيل.".to_string());
         }
-        let config = inner.config.clone().unwrap_or_else(default_config);
-        (inner.ready, config.api_port)
+        (
+            inner.ready,
+            inner
+                .config
+                .as_ref()
+                .map(|config| config.api_port)
+                .unwrap_or(0),
+        )
     };
 
     if should_check_health && !health_request(api_port).unwrap_or(false) {
@@ -115,16 +258,27 @@ pub fn runtime_info(state: &DesktopState) -> Result<RuntimeInfo, String> {
         .inner
         .lock()
         .map_err(|_| "تعذر الوصول إلى حالة التطبيق المحلي.".to_string())?;
-    let config = inner.config.clone().unwrap_or_else(default_config);
+    let mysql_port = inner
+        .config
+        .as_ref()
+        .map(|config| config.mysql_port)
+        .unwrap_or(0);
+    let api_port = inner
+        .config
+        .as_ref()
+        .map(|config| config.api_port)
+        .unwrap_or(0);
 
     Ok(RuntimeInfo {
         desktop: true,
         ready: inner.ready,
         activated: inner.config.as_ref().is_some_and(|value| value.activated),
-        api_base_url: format!("http://127.0.0.1:{}/api/v1", config.api_port),
-        mysql_port: config.mysql_port,
-        api_port: config.api_port,
+        api_base_url: format!("http://127.0.0.1:{api_port}/api/v1"),
+        mysql_port,
+        api_port,
         error: inner.last_error.clone(),
+        recovery_required: inner.recovery_required,
+        recovery_notice: inner.recovery_notice.clone(),
     })
 }
 
@@ -171,7 +325,15 @@ pub fn ensure_mysql_running(state: &DesktopState) -> Result<RuntimeContext, Stri
         .executables
         .clone()
         .ok_or_else(|| "ملفات التشغيل المحلي غير متاحة.".to_string())?;
-    let mut config = inner.config.clone().unwrap_or_else(default_config);
+    let mut config = inner.config.clone().ok_or_else(|| {
+        "إعدادات التشغيل غير متاحة؛ استرداد الإعدادات مطلوب قبل تشغيل MySQL.".to_string()
+    })?;
+    if inner.recovery_required {
+        return Err("يلزم استرداد النظام قبل إعادة تشغيل الخدمات.".into());
+    }
+    if inner.instance_lock.is_none() {
+        inner.instance_lock = Some(runtime_files::acquire_instance_lock(&paths.runtime_dir)?);
+    }
 
     if inner.mysql_child.as_mut().is_some_and(child_is_running) {
         return Ok(RuntimeContext {
@@ -185,6 +347,12 @@ pub fn ensure_mysql_running(state: &DesktopState) -> Result<RuntimeContext, Stri
         let _ = exited_child.wait();
     }
 
+    if health_request(config.api_port).unwrap_or(false) {
+        return Err(
+            "خدمة نسخة أخرى من النظام ما زالت تعمل. أغلق النسخة الأخرى ثم أعد المحاولة.".into(),
+        );
+    }
+
     save_config(&paths.config_file, &config)?;
     write_mysql_client_file(&paths.root_client_file, &config)?;
 
@@ -196,7 +364,14 @@ pub fn ensure_mysql_running(state: &DesktopState) -> Result<RuntimeContext, Stri
 
     if port_is_in_use(config.mysql_port) {
         if mysql_credentials_work(&context) {
+            if !mysql_uses_data_directory(&context)? {
+                return Err(
+                    "منفذ MySQL مستخدم بواسطة خادم له مجلد بيانات مختلف. لم تُعدّل بيانات العيادة."
+                        .into(),
+                );
+            }
             inner.config = Some(config);
+            inner.mysql_managed = true;
             drop(inner);
             ensure_application_database(&context)?;
 
@@ -211,7 +386,7 @@ pub fn ensure_mysql_running(state: &DesktopState) -> Result<RuntimeContext, Stri
 
     let initialized = initialize_mysql_data(&paths, &executables)?;
     let bootstrap_file = paths.runtime_dir.join("mysql-bootstrap.sql");
-    if initialized {
+    if initialized || bootstrap_file.exists() {
         write_mysql_bootstrap_file(&bootstrap_file, &config)?;
     }
 
@@ -222,6 +397,7 @@ pub fn ensure_mysql_running(state: &DesktopState) -> Result<RuntimeContext, Stri
         bootstrap_file.exists().then_some(bootstrap_file.as_path()),
     )?;
     inner.mysql_child = Some(child);
+    inner.mysql_managed = true;
     inner.config = Some(config.clone());
     drop(inner);
 
@@ -346,6 +522,8 @@ async fn activate_new_database_attempt(
         }
     }
 
+    ensure_no_existing_rows(pool).await?;
+
     api::schema::reset(pool).await?;
     let mut transaction = pool
         .begin()
@@ -381,6 +559,31 @@ async fn activate_new_database_attempt(
         .commit()
         .await
         .map_err(|error| format!("تعذر اعتماد تفعيل النظام: {error}"))?;
+    Ok(())
+}
+
+async fn ensure_no_existing_rows(pool: &MySqlPool) -> Result<(), String> {
+    // A missing/deleted users table does not make existing clinical data disposable.
+    let tables = sqlx::query_scalar::<_, String>(
+        "SELECT table_name FROM information_schema.tables \
+         WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE' AND table_name <> 'migrations'",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|error| format!("تعذر فحص البيانات الموجودة قبل التفعيل: {error}"))?;
+    for table in tables {
+        let has_rows = sqlx::query_scalar::<_, i64>(&format!(
+            "SELECT EXISTS(SELECT 1 FROM {} LIMIT 1)",
+            quote_identifier(&table),
+        ))
+        .fetch_one(pool)
+        .await
+        .map_err(|error| format!("تعذر التأكد من خلو قاعدة البيانات قبل التفعيل: {error}"))?;
+        if has_rows != 0 {
+            return Err("قاعدة البيانات المحلية تحتوي على سجلات ولا يمكن تهيئتها كتثبيت جديد. يلزم استرداد التثبيت الموجود بواسطة المسؤول.".into());
+        }
+    }
+
     Ok(())
 }
 
@@ -476,12 +679,13 @@ pub fn mark_activated_and_start_api(state: &DesktopState) -> Result<RuntimeInfo,
             .paths
             .clone()
             .ok_or_else(|| "مسارات التشغيل المحلي غير مهيأة.".to_string())?;
-        let config = inner
+        let mut config = inner
             .config
-            .as_mut()
+            .clone()
             .ok_or_else(|| "إعدادات التشغيل المحلي غير موجودة.".to_string())?;
         config.activated = true;
-        save_config(&paths.config_file, config)?;
+        save_config(&paths.config_file, &config)?;
+        inner.config = Some(config);
         inner.last_error = None;
     }
     start_rust_api(state)?;
@@ -494,6 +698,9 @@ pub fn start_rust_api(state: &DesktopState) -> Result<(), String> {
             .inner
             .lock()
             .map_err(|_| "تعذر الوصول إلى حالة التطبيق المحلي.".to_string())?;
+        if inner.recovery_required {
+            return Err("يلزم التحقق من الاستعادة وإكمال الاسترداد قبل تشغيل الخدمة المحلية.".into());
+        }
         inner.api_server.as_ref().and_then(|server| {
             (!server.task.inner().is_finished())
                 .then(|| inner.config.as_ref().map(|config| config.api_port))
@@ -669,27 +876,43 @@ pub fn stop_rust_api(state: &DesktopState) -> Result<(), String> {
 fn stop_mysql_child(state: &DesktopState) {
     if let Ok(mut inner) = state.inner.lock() {
         if let Some(mut child) = inner.mysql_child.take() {
-            let _ = child.kill();
-            let _ = child.wait();
+            native_process::terminate_owned_child(&mut child);
         }
+        inner.mysql_managed = false;
     }
 }
 
 pub fn shutdown(state: &DesktopState) {
     let _operation = state.operation_lock.lock().ok();
     let context = context(state).ok();
+    let managed = state
+        .inner
+        .lock()
+        .map(|inner| inner.mysql_managed || inner.mysql_child.is_some())
+        .unwrap_or(false);
     let _ = stop_rust_api(state);
 
-    if let Some(context) = context {
+    if let Some(context) = context.filter(|_| managed) {
         let mut command = Command::new(&context.executables.mysqladmin);
         hide_console_window(&mut command);
         command
             .arg(format!(
-                "--defaults-extra-file={}",
+                "--defaults-file={}",
                 context.paths.root_client_file.display()
             ))
-            .arg("shutdown");
-        let _ = command.output();
+            .args(["--no-login-paths", "--connect-timeout=5", "shutdown"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let result = native_process::output(&mut command, Duration::from_secs(15), "إغلاق MySQL");
+        if let Err(error) = result.and_then(|output| {
+            if output.status.success() {
+                Ok(())
+            } else {
+                Err("تعذر إغلاق MySQL بشكل سليم.".into())
+            }
+        }) {
+            record_runtime_error(state, &error);
+        }
     }
 
     if let Ok(mut inner) = state.inner.lock() {
@@ -697,21 +920,30 @@ pub fn shutdown(state: &DesktopState) {
             let deadline = Instant::now() + Duration::from_secs(8);
             while Instant::now() < deadline {
                 if child.try_wait().ok().flatten().is_some() {
-                    return;
+                    break;
                 }
                 thread::sleep(Duration::from_millis(100));
             }
-            let _ = child.kill();
-            let _ = child.wait();
+            if child.try_wait().ok().flatten().is_none() {
+                native_process::terminate_owned_child(&mut child);
+            }
         }
+        inner.mysql_managed = false;
+        inner.instance_lock = None;
     }
 }
 
 pub fn mysql_output(context: &RuntimeContext, args: &[String]) -> Result<Output, String> {
-    let output = mysql_command(context)
+    let mut command = mysql_command(context);
+    command
         .args(args)
-        .output()
-        .map_err(|error| format!("تعذر الاتصال بقاعدة البيانات المحلية: {error}"))?;
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let output = native_process::output(
+        &mut command,
+        DATABASE_OPERATION_TIMEOUT,
+        "الاتصال بقاعدة البيانات المحلية",
+    )?;
 
     if !output.status.success() {
         return Err(format!(
@@ -727,9 +959,10 @@ pub fn mysql_command(context: &RuntimeContext) -> Command {
     let mut command = Command::new(&context.executables.mysql);
     hide_console_window(&mut command);
     command.arg(format!(
-        "--defaults-extra-file={}",
+        "--defaults-file={}",
         context.paths.root_client_file.display()
     ));
+    command.args(["--no-login-paths", "--connect-timeout=5"]);
     command
 }
 
@@ -737,9 +970,10 @@ pub fn mysqldump_command(context: &RuntimeContext) -> Command {
     let mut command = Command::new(&context.executables.mysqldump);
     hide_console_window(&mut command);
     command.arg(format!(
-        "--defaults-extra-file={}",
+        "--defaults-file={}",
         context.paths.root_client_file.display()
     ));
+    command.arg("--no-login-paths");
     command
 }
 
@@ -875,39 +1109,16 @@ fn default_config() -> InstallConfig {
     }
 }
 
-fn load_config(path: &Path) -> Result<Option<InstallConfig>, String> {
-    if !path.exists() {
-        return Ok(None);
-    }
-    let bytes =
-        fs::read(path).map_err(|error| format!("تعذر قراءة إعدادات التشغيل المحلي: {error}"))?;
-    let config: InstallConfig = serde_json::from_slice(&bytes)
-        .map_err(|error| format!("ملف إعدادات التشغيل المحلي غير صالح: {error}"))?;
-    if config.format_version != CONFIG_FORMAT_VERSION {
-        return Err("إصدار إعدادات التشغيل المحلي غير مدعوم.".to_string());
-    }
-    Ok(Some(config))
-}
-
 fn save_config(path: &Path, config: &InstallConfig) -> Result<(), String> {
-    let temporary = path.with_extension("json.tmp");
-    let bytes = serde_json::to_vec_pretty(config)
-        .map_err(|error| format!("تعذر تجهيز إعدادات التشغيل المحلي: {error}"))?;
-    fs::write(&temporary, bytes)
-        .map_err(|error| format!("تعذر حفظ إعدادات التشغيل المحلي: {error}"))?;
-    set_private_permissions(&temporary)?;
-    fs::rename(&temporary, path)
-        .map_err(|error| format!("تعذر تثبيت إعدادات التشغيل المحلي: {error}"))?;
-    set_private_permissions(path)
+    runtime_files::save_config(path, config)
 }
 
 fn write_mysql_client_file(path: &Path, config: &InstallConfig) -> Result<(), String> {
     let contents = format!(
-        "[client]\nuser=root\npassword={}\nhost=127.0.0.1\nport={}\nprotocol=tcp\ndefault-character-set=utf8mb4\n",
-        config.root_password, config.mysql_port
+        "[client]\nuser=root\npassword=\"{}\"\nhost=127.0.0.1\nport={}\nprotocol=tcp\ndefault-character-set=utf8mb4\n",
+        config.root_password.replace('\\', "\\\\").replace('"', "\\\""), config.mysql_port
     );
-    fs::write(path, contents).map_err(|error| format!("تعذر حفظ اتصال قاعدة البيانات: {error}"))?;
-    set_private_permissions(path)
+    runtime_files::atomic_write(path, contents.as_bytes())
 }
 
 fn write_mysql_bootstrap_file(path: &Path, config: &InstallConfig) -> Result<(), String> {
@@ -919,16 +1130,40 @@ fn write_mysql_bootstrap_file(path: &Path, config: &InstallConfig) -> Result<(),
          GRANT ALL PRIVILEGES ON *.* TO 'root'@'127.0.0.1' WITH GRANT OPTION;\n\
          FLUSH PRIVILEGES;\n"
     );
-    fs::write(path, sql).map_err(|error| format!("تعذر تجهيز حساب MySQL المحلي: {error}"))?;
-    set_private_permissions(path)
+    runtime_files::atomic_write(path, sql.as_bytes())
 }
 
 fn mysql_credentials_work(context: &RuntimeContext) -> bool {
-    mysql_command(context)
+    let mut command = mysql_command(context);
+    command
         .args(["--batch", "--skip-column-names", "-e", "SELECT 1"])
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    native_process::output(&mut command, Duration::from_secs(15), "فحص اتصال MySQL")
         .map(|output| output.status.success())
         .unwrap_or(false)
+}
+
+fn mysql_uses_data_directory(context: &RuntimeContext) -> Result<bool, String> {
+    let output = mysql_output(
+        context,
+        &[
+            "--batch".into(),
+            "--skip-column-names".into(),
+            "-e".into(),
+            "SELECT @@datadir".into(),
+        ],
+    )?;
+    let actual = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+    let actual = actual
+        .canonicalize()
+        .map_err(|error| format!("تعذر التحقق من مجلد MySQL الجاري: {error}"))?;
+    let expected = context
+        .paths
+        .mysql_data_dir
+        .canonicalize()
+        .map_err(|error| format!("تعذر التحقق من مجلد بيانات العيادة: {error}"))?;
+    Ok(actual == expected)
 }
 
 fn initialize_mysql_data(
@@ -937,6 +1172,9 @@ fn initialize_mysql_data(
 ) -> Result<bool, String> {
     if paths.mysql_data_dir.join("mysql").exists() {
         return Ok(false);
+    }
+    if mysql_data_exists(&paths.mysql_data_dir)? {
+        return Err("مجلد MySQL يحتوي ملفات موجودة أو تهيئة غير مكتملة. لم تُعد تهيئته لحماية البيانات؛ يلزم فحصه بواسطة المسؤول.".into());
     }
     fs::create_dir_all(&paths.mysql_data_dir)
         .map_err(|error| format!("تعذر إنشاء بيانات MySQL: {error}"))?;
@@ -950,9 +1188,12 @@ fn initialize_mysql_data(
     if let Some(base) = &executables.mysql_base {
         command.arg(format!("--basedir={}", base.display()));
     }
-    let output = command
-        .output()
-        .map_err(|error| format!("تعذر تهيئة MySQL المحلي: {error}"))?;
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let output = native_process::output(
+        &mut command,
+        DATABASE_OPERATION_TIMEOUT,
+        "تهيئة MySQL المحلي",
+    )?;
     if !output.status.success() {
         return Err(format!(
             "فشلت تهيئة MySQL المحلي: {}",
@@ -1033,8 +1274,11 @@ fn establish_mysql_credentials(context: &RuntimeContext) -> Result<(), String> {
     for host in ["127.0.0.1", "localhost"] {
         let mut command = Command::new(&context.executables.mysql);
         hide_console_window(&mut command);
-        let output = command
+        command
             .args([
+                "--no-defaults",
+                "--no-login-paths",
+                "--connect-timeout=5",
                 "--protocol=tcp",
                 &format!("--host={host}"),
                 &format!("--port={}", context.config.mysql_port),
@@ -1043,8 +1287,14 @@ fn establish_mysql_credentials(context: &RuntimeContext) -> Result<(), String> {
                 "-e",
                 &sql,
             ])
-            .output()
-            .map_err(|error| format!("تعذر تأمين حساب MySQL المحلي: {error}"))?;
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let output = native_process::output(
+            &mut command,
+            Duration::from_secs(15),
+            "تأمين حساب MySQL المحلي",
+        )?;
         if output.status.success() && mysql_credentials_work(context) {
             return Ok(());
         }
@@ -1211,7 +1461,7 @@ fn port_is_in_use(port: u16) -> bool {
 }
 
 fn child_is_running(child: &mut Child) -> bool {
-    child.try_wait().ok().flatten().is_none()
+    child.try_wait().is_ok_and(|status| status.is_none())
 }
 
 fn append_log(path: &Path) -> Result<File, String> {
@@ -1262,24 +1512,143 @@ fn command_error(output: &Output) -> String {
     }
 }
 
+fn parse_mysql_count(bytes: &[u8]) -> Result<u64, String> {
+    String::from_utf8_lossy(bytes)
+        .trim()
+        .parse()
+        .map_err(|_| "تعذر تأكيد حالة قاعدة البيانات؛ لم يُعتبر التثبيت فارغًا.".to_string())
+}
+
 pub fn record_runtime_error(state: &DesktopState, error: &str) {
-    if let Ok(mut inner) = state.inner.lock() {
+    let log = if let Ok(mut inner) = state.inner.lock() {
+        let mut safe_error = error.to_string();
+        if let Some(config) = &inner.config {
+            for secret in [&config.root_password, &config.app_password, &config.app_key] {
+                if !secret.is_empty() {
+                    safe_error = safe_error.replace(secret, "[محجوب]");
+                }
+            }
+        }
         inner.ready = false;
-        inner.last_error = Some(error.to_string());
+        inner.last_error = Some(safe_error.clone());
+        inner
+            .paths
+            .as_ref()
+            .and_then(|paths| paths.mysql_log.parent())
+            .map(|parent| (parent.join("runtime.log"), safe_error))
+    } else {
+        None
+    };
+    if let Some((path, error)) = log {
+        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
+            let _ = writeln!(
+                file,
+                "{} {}",
+                chrono::Utc::now().to_rfc3339(),
+                error.replace(['\r', '\n'], " ")
+            );
+            let _ = file.sync_all();
+        }
     }
 }
 
-#[cfg(unix)]
-fn set_private_permissions(path: &Path) -> Result<(), String> {
-    use std::os::unix::fs::PermissionsExt;
-    let permissions = fs::Permissions::from_mode(0o600);
-    fs::set_permissions(path, permissions)
-        .map_err(|error| format!("تعذر حماية ملف التشغيل المحلي: {error}"))
+pub fn require_recovery(state: &DesktopState, error: &str) {
+    let marker = if let Ok(mut inner) = state.inner.lock() {
+        inner.recovery_required = true;
+        inner
+            .paths
+            .as_ref()
+            .map(|paths| paths.runtime_dir.join("RECOVERY_REQUIRED"))
+    } else {
+        None
+    };
+    if let Some(marker) = marker.filter(|path| !path.exists()) {
+        if let Err(marker_error) = runtime_files::atomic_write(
+            &marker,
+            b"An incomplete restore requires a verified recovery before startup.\n",
+        ) {
+            record_runtime_error(state, &marker_error);
+        }
+    }
+    record_runtime_error(state, error);
 }
 
-#[cfg(not(unix))]
-fn set_private_permissions(_path: &Path) -> Result<(), String> {
+pub fn begin_database_replacement(state: &DesktopState, work_dir: &Path) -> Result<(), String> {
+    let mut inner = state
+        .inner
+        .lock()
+        .map_err(|_| "تعذر حماية عملية الاستعادة.".to_string())?;
+    if inner.recovery_required {
+        return Err("توجد عملية استرداد سابقة لم تكتمل.".into());
+    }
+    let paths = inner
+        .paths
+        .as_ref()
+        .ok_or_else(|| "مسارات التشغيل غير متاحة.".to_string())?;
+    let message = format!(
+        "An incomplete restore requires verified recovery before startup.\nRestore work: {}\n",
+        work_dir.display()
+    );
+    runtime_files::atomic_write(
+        &paths.runtime_dir.join("RECOVERY_REQUIRED"),
+        message.as_bytes(),
+    )?;
+    inner.recovery_required = true;
+    inner.ready = false;
     Ok(())
+}
+
+// Call only after the restored database or its rollback has passed validation.
+pub fn finish_database_replacement(state: &DesktopState) -> Result<(), String> {
+    let mut inner = state
+        .inner
+        .lock()
+        .map_err(|_| "تعذر إكمال حماية الاستعادة.".to_string())?;
+    let paths = inner
+        .paths
+        .as_ref()
+        .ok_or_else(|| "مسارات التشغيل غير متاحة.".to_string())?;
+    match fs::remove_file(paths.runtime_dir.join("RECOVERY_REQUIRED")) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(format!(
+                "تم التحقق من البيانات لكن تعذر إزالة علامة الاسترداد: {error}"
+            ))
+        }
+    }
+    inner.recovery_required = false;
+    Ok(())
+}
+
+pub fn validate_restored_database(context: &RuntimeContext, database: &str) -> Result<(), String> {
+    let config = database_api_config(context, database, true);
+    run_async_operation(
+        async move {
+            let pool = api::db::connect(&config).await?;
+            let result = async {
+                api::schema::validate(&pool).await?;
+                let admins = sqlx::query_scalar::<_, i64>(
+                    "SELECT COUNT(*) FROM users WHERE role='admin' AND is_active=1",
+                )
+                .fetch_one(&pool)
+                .await
+                .map_err(|error| format!("تعذر فحص حساب المدير في النسخة: {error}"))?;
+                let settings = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM settings")
+                    .fetch_one(&pool)
+                    .await
+                    .map_err(|error| format!("تعذر فحص إعدادات العيادة في النسخة: {error}"))?;
+                if admins < 1 || settings != 1 {
+                    return Err("النسخة لا تحتوي حساب مدير فعالًا وإعدادات عيادة مكتملة.".into());
+                }
+                Ok(())
+            }
+            .await;
+            pool.close().await;
+            result
+        },
+        "انتهت مهلة التحقق من قاعدة البيانات المستعادة.",
+    )
 }
 
 #[cfg(test)]
@@ -1306,6 +1675,404 @@ mod tests {
         time::{Duration, Instant},
     };
     use uuid::Uuid;
+
+    struct RuntimeFilesFixture {
+        root: PathBuf,
+        paths: RuntimePaths,
+    }
+    impl RuntimeFilesFixture {
+        fn new() -> Self {
+            let root = std::env::temp_dir().join(format!(
+                "clinic-runtime-regression-{}",
+                Uuid::new_v4().simple()
+            ));
+            let runtime_dir = root.join("runtime");
+            let mysql_data_dir = root.join("mysql-data");
+            let logs_dir = root.join("logs");
+            for directory in [&runtime_dir, &mysql_data_dir, &logs_dir] {
+                fs::create_dir_all(directory).unwrap();
+            }
+            Self {
+                paths: RuntimePaths {
+                    resource_root: PathBuf::new(),
+                    runtime_dir: runtime_dir.clone(),
+                    mysql_data_dir,
+                    mysql_log: logs_dir.join("mysql.log"),
+                    config_file: runtime_dir.join("install.json"),
+                    root_client_file: runtime_dir.join("mysql-root.cnf"),
+                },
+                root,
+            }
+        }
+    }
+    impl Drop for RuntimeFilesFixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    #[test]
+    fn missing_config_with_existing_mysql_data_never_generates_new_credentials() {
+        let fixture = RuntimeFilesFixture::new();
+        let data = fixture.paths.mysql_data_dir.join("ibdata1");
+        fs::write(&data, b"existing data fixture").unwrap();
+        let state = DesktopState::default();
+        let error = super::prepare_install_config(&state, &fixture.paths).unwrap_err();
+        super::record_runtime_error(&state, &error);
+        let info = runtime_info(&state).unwrap();
+        assert!(info.recovery_required);
+        assert!(!info.ready);
+        assert!(!fixture.paths.config_file.exists());
+        assert_eq!(fs::read(data).unwrap(), b"existing data fixture");
+        super::shutdown(&state);
+    }
+
+    #[test]
+    fn corrupt_configuration_cannot_fall_through_to_a_new_installation() {
+        let fixture = RuntimeFilesFixture::new();
+        fs::write(&fixture.paths.config_file, [0; 390]).unwrap();
+        let state = DesktopState::default();
+        assert!(super::prepare_install_config(&state, &fixture.paths).is_err());
+        assert!(state.inner.lock().unwrap().recovery_required);
+        assert!(super::ensure_mysql_running(&state).is_err());
+        assert_eq!(fs::read(&fixture.paths.config_file).unwrap(), vec![0; 390]);
+        super::shutdown(&state);
+    }
+
+    #[test]
+    fn zeroed_mysql_client_file_is_regenerated_from_the_same_config() {
+        let fixture = RuntimeFilesFixture::new();
+        let config = super::default_config();
+        super::write_mysql_client_file(&fixture.paths.root_client_file, &config).unwrap();
+        let expected = fs::read(&fixture.paths.root_client_file).unwrap();
+        fs::write(&fixture.paths.root_client_file, [0; 162]).unwrap();
+        super::write_mysql_client_file(&fixture.paths.root_client_file, &config).unwrap();
+        assert_eq!(fs::read(&fixture.paths.root_client_file).unwrap(), expected);
+    }
+
+    #[test]
+    fn recovered_configuration_preserves_activation_and_existing_data() {
+        let fixture = RuntimeFilesFixture::new();
+        let mut original = super::default_config();
+        original.activated = true;
+        super::save_config(&fixture.paths.config_file, &original).unwrap();
+        fs::write(&fixture.paths.config_file, [0; 390]).unwrap();
+        fs::write(&fixture.paths.root_client_file, [0; 162]).unwrap();
+        let data = fixture.paths.mysql_data_dir.join("ibdata1");
+        fs::write(&data, b"existing clinic data fixture").unwrap();
+        let state = DesktopState::default();
+
+        let recovered = super::prepare_install_config(&state, &fixture.paths).unwrap();
+        assert_eq!(recovered.root_password, original.root_password);
+        assert_eq!(recovered.app_password, original.app_password);
+        assert!(recovered.activated);
+        assert!(!state.inner.lock().unwrap().recovery_required);
+        assert!(state.inner.lock().unwrap().recovery_notice.is_some());
+        super::write_mysql_client_file(&fixture.paths.root_client_file, &recovered).unwrap();
+        assert!(!fs::read(&fixture.paths.root_client_file)
+            .unwrap()
+            .contains(&0));
+        assert_eq!(fs::read(data).unwrap(), b"existing clinic data fixture");
+        super::shutdown(&state);
+    }
+
+    #[test]
+    fn second_runtime_is_rejected_before_repairing_or_creating_config_files() {
+        let fixture = RuntimeFilesFixture::new();
+        let owner =
+            crate::runtime_files::acquire_instance_lock(&fixture.paths.runtime_dir).unwrap();
+        fs::write(&fixture.paths.config_file, [0; 390]).unwrap();
+        let state = DesktopState::default();
+
+        let error = super::prepare_install_config(&state, &fixture.paths).unwrap_err();
+        assert!(error.contains("نسخة أخرى"));
+        assert!(state.inner.lock().unwrap().instance_lock.is_none());
+        assert_eq!(fs::read(&fixture.paths.config_file).unwrap(), vec![0; 390]);
+        assert!(!fixture
+            .paths
+            .config_file
+            .with_extension("json.backup")
+            .exists());
+        assert!(!fixture.paths.root_client_file.exists());
+        super::shutdown(&state);
+        drop(owner);
+    }
+
+    #[test]
+    fn activation_is_not_reported_as_committed_when_config_save_fails() {
+        let fixture = RuntimeFilesFixture::new();
+        let original = super::default_config();
+        // A blocked destination makes the final replacement fail on every OS.
+        fs::create_dir(&fixture.paths.config_file).unwrap();
+        let state = DesktopState::default();
+        {
+            let mut inner = state.inner.lock().unwrap();
+            inner.paths = Some(fixture.paths.clone());
+            inner.config = Some(original);
+        }
+
+        assert!(super::mark_activated_and_start_api(&state).is_err());
+        let info = super::runtime_info(&state).unwrap();
+        assert!(!info.activated);
+        assert!(!info.ready);
+        assert!(state.inner.lock().unwrap().api_server.is_none());
+        super::shutdown(&state);
+    }
+
+    #[test]
+    #[ignore = "requires bundled MySQL 8 executables; uses only its own temporary database"]
+    fn runtime_recovers_zeroed_files_and_interrupted_activation_with_existing_rows() {
+        struct ShutdownOnDrop(DesktopState);
+        impl Drop for ShutdownOnDrop {
+            fn drop(&mut self) {
+                super::shutdown(&self.0);
+            }
+        }
+
+        let fixture = RuntimeFilesFixture::new();
+        #[cfg(windows)]
+        let executables = {
+            let base = std::env::var_os("CLINIC_TEST_MYSQL_BASE")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| {
+                    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/runtime/mysql")
+                });
+            RuntimeExecutables {
+                mysqld: base.join("bin/mysqld.exe"),
+                mysql: base.join("bin/mysql.exe"),
+                mysqldump: base.join("bin/mysqldump.exe"),
+                mysqladmin: base.join("bin/mysqladmin.exe"),
+                mysql_base: Some(base),
+            }
+        };
+        #[cfg(not(windows))]
+        let executables = RuntimeExecutables {
+            mysqld: PathBuf::from("/usr/sbin/mysqld"),
+            mysql: PathBuf::from("/usr/bin/mysql"),
+            mysqldump: PathBuf::from("/usr/bin/mysqldump"),
+            mysqladmin: PathBuf::from("/usr/bin/mysqladmin"),
+            mysql_base: None,
+        };
+        let configure = |state: &DesktopState, config: InstallConfig| {
+            let mut inner = state.inner.lock().unwrap();
+            inner.paths = Some(fixture.paths.clone());
+            inner.config = Some(config);
+            inner.executables = Some(executables.clone());
+        };
+        let original = DesktopState::default();
+        let _original_cleanup = ShutdownOnDrop(original.clone());
+        let mut config = super::default_config();
+        config.database = "clinic_rust_test_runtime_recovery".into();
+        configure(&original, config);
+        super::activate_new(
+            &original,
+            NewActivationRequest {
+                clinic_name: "عيادة اختبار حماية التشغيل".into(),
+                clinic_subtitle: None,
+                admin_name: "مدير اختبار التشغيل".into(),
+                admin_username: "runtime-test-admin".into(),
+                admin_password: "Runtime-test-only-123!".into(),
+            },
+        )
+        .unwrap();
+        let context = super::context(&original).unwrap();
+        let database = quote_identifier(&context.config.database);
+        let query = |context: &RuntimeContext, sql: String| {
+            super::mysql_output(
+                context,
+                &[
+                    "--batch".into(),
+                    "--skip-column-names".into(),
+                    "-e".into(),
+                    sql,
+                ],
+            )
+            .unwrap()
+            .stdout
+        };
+        query(&context, format!(
+            "INSERT INTO {database}.patients (name, phone, gender, is_active, created_by, created_at, updated_at) \
+             SELECT 'مريض اختبار الاسترداد', '0910000000', 'male', 1, id, NOW(), NOW() FROM {database}.users LIMIT 1"
+        ));
+        let verification_sql = format!(
+            "SELECT id, username, password, role FROM {database}.users ORDER BY id; \
+             SELECT id, name, phone, created_by FROM {database}.patients ORDER BY id; \
+             SELECT id, clinic_name FROM {database}.settings ORDER BY id"
+        );
+        let expected = query(&context, verification_sql.clone());
+        let credentials = context.config.clone();
+        super::shutdown(&original);
+
+        // Reproduce the two zero-filled files from the incident on test data only.
+        fs::write(&fixture.paths.config_file, [0; 390]).unwrap();
+        fs::write(&fixture.paths.root_client_file, [0; 162]).unwrap();
+        let recovered = DesktopState::default();
+        let _recovered_cleanup = ShutdownOnDrop(recovered.clone());
+        let config = super::prepare_install_config(&recovered, &fixture.paths).unwrap();
+        assert_eq!(config.root_password, credentials.root_password);
+        assert_eq!(config.app_password, credentials.app_password);
+        configure(&recovered, config);
+        super::start_prepared_runtime(&recovered).unwrap();
+        let info = runtime_info(&recovered).unwrap();
+        assert!(info.ready && info.activated);
+        assert!(info.recovery_notice.is_some());
+        let context = super::context(&recovered).unwrap();
+        assert_eq!(query(&context, verification_sql.clone()), expected);
+        super::shutdown(&recovered);
+
+        // Committed users with a lost activation flag must resume the existing install.
+        let mut interrupted = context.config.clone();
+        interrupted.activated = false;
+        super::save_config(&fixture.paths.config_file, &interrupted).unwrap();
+        let resumed = DesktopState::default();
+        let _resumed_cleanup = ShutdownOnDrop(resumed.clone());
+        let config = super::prepare_install_config(&resumed, &fixture.paths).unwrap();
+        configure(&resumed, config);
+        super::start_prepared_runtime(&resumed).unwrap();
+        let info = runtime_info(&resumed).unwrap();
+        assert!(info.ready && info.activated);
+        let context = super::context(&resumed).unwrap();
+        assert_eq!(query(&context, verification_sql), expected);
+
+        // Missing users with other rows must present recovery instead of new setup.
+        query(
+            &context,
+            format!("SET FOREIGN_KEY_CHECKS=0; DELETE FROM {database}.users"),
+        );
+        super::shutdown(&resumed);
+        let mut incomplete = context.config.clone();
+        incomplete.activated = false;
+        super::save_config(&fixture.paths.config_file, &incomplete).unwrap();
+        let blocked = DesktopState::default();
+        let _blocked_cleanup = ShutdownOnDrop(blocked.clone());
+        let config = super::prepare_install_config(&blocked, &fixture.paths).unwrap();
+        configure(&blocked, config);
+        let error = super::start_prepared_runtime(&blocked).unwrap_err();
+        super::record_runtime_error(&blocked, &error);
+        let info = runtime_info(&blocked).unwrap();
+        assert!(info.recovery_required);
+        assert!(!info.ready && !info.activated);
+        assert!(blocked.inner.lock().unwrap().api_server.is_none());
+        let context = super::context(&blocked).unwrap();
+        assert_eq!(
+            super::parse_mysql_count(&query(
+                &context,
+                format!("SELECT COUNT(*) FROM {database}.patients")
+            ))
+            .unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn incomplete_mysql_directory_is_rejected_before_launching_the_initializer() {
+        let fixture = RuntimeFilesFixture::new();
+        let data = fixture.paths.mysql_data_dir.join("ibdata1");
+        fs::write(&data, b"preserve partial data").unwrap();
+        let executables = RuntimeExecutables {
+            mysqld: PathBuf::from("not-a-real-test-executable"),
+            mysql: PathBuf::new(),
+            mysqldump: PathBuf::new(),
+            mysqladmin: PathBuf::new(),
+            mysql_base: None,
+        };
+        assert!(super::initialize_mysql_data(&fixture.paths, &executables).is_err());
+        assert_eq!(fs::read(data).unwrap(), b"preserve partial data");
+    }
+
+    #[test]
+    fn failed_restore_marker_blocks_startup_across_process_restarts() {
+        let fixture = RuntimeFilesFixture::new();
+        fs::write(
+            fixture.paths.runtime_dir.join("RECOVERY_REQUIRED"),
+            b"failed restore",
+        )
+        .unwrap();
+        let state = DesktopState::default();
+        assert!(super::prepare_install_config(&state, &fixture.paths).is_err());
+        assert!(state.inner.lock().unwrap().recovery_required);
+        assert!(!fixture.paths.config_file.exists());
+        super::shutdown(&state);
+    }
+
+    #[test]
+    fn interrupted_replacement_persists_a_guard_before_a_new_process_starts() {
+        let fixture = RuntimeFilesFixture::new();
+        let state = DesktopState::default();
+        state.inner.lock().unwrap().paths = Some(fixture.paths.clone());
+        let work_dir = fixture.paths.runtime_dir.join("restore-work/test-owned");
+        super::begin_database_replacement(&state, &work_dir).unwrap();
+        assert!(state.inner.lock().unwrap().recovery_required);
+        assert!(super::start_rust_api(&state).is_err());
+        super::require_recovery(&state, "test interrupted restore");
+        let marker =
+            fs::read_to_string(fixture.paths.runtime_dir.join("RECOVERY_REQUIRED")).unwrap();
+        assert!(marker.contains(&work_dir.display().to_string()));
+        let restarted = DesktopState::default();
+        assert!(super::prepare_install_config(&restarted, &fixture.paths).is_err());
+        super::shutdown(&restarted);
+        super::finish_database_replacement(&state).unwrap();
+        assert!(!fixture.paths.runtime_dir.join("RECOVERY_REQUIRED").exists());
+        assert!(!state.inner.lock().unwrap().recovery_required);
+    }
+
+    #[test]
+    fn malformed_mysql_counts_never_imply_an_empty_database() {
+        assert_eq!(super::parse_mysql_count(b"0\n").unwrap(), 0);
+        for bytes in [b"".as_slice(), b"broken", b"0\n1", b"-1"] {
+            assert!(super::parse_mysql_count(bytes).is_err());
+        }
+    }
+
+    #[test]
+    #[ignore = "requires an isolated MySQL 8 database"]
+    fn activation_preserves_business_rows_when_the_users_table_is_empty() {
+        let database = std::env::var("RUST_MYSQL_DATABASE").unwrap();
+        assert!(database.starts_with("clinic_rust_test_"));
+        let port = std::env::var("RUST_MYSQL_PORT").unwrap().parse().unwrap();
+        let username = std::env::var("RUST_MYSQL_USER").unwrap();
+        let password = std::env::var("RUST_MYSQL_PASSWORD").unwrap();
+        run_async_operation(async move {
+            let pool = api::db::connect_database("127.0.0.1", port, &database, &username, &password).await?;
+            api::schema::reset(&pool).await?;
+            let mut connection = pool.acquire().await.map_err(|error| error.to_string())?;
+            sqlx::query("SET FOREIGN_KEY_CHECKS=0").execute(&mut *connection).await.map_err(|error| error.to_string())?;
+            sqlx::query("INSERT INTO patients (name, phone, age, gender, created_by, is_active, created_at, updated_at) VALUES ('مريض محفوظ دون مستخدمين', '0910000000', 35, 'male', 999, 1, NOW(), NOW())")
+                .execute(&mut *connection).await.map_err(|error| error.to_string())?;
+            sqlx::query("SET FOREIGN_KEY_CHECKS=1").execute(&mut *connection).await.map_err(|error| error.to_string())?;
+            drop(connection);
+            let error = super::activate_new_database_attempt(&pool, "Test".into(), None, "Admin".into(), "test".into(), "unused-hash".into()).await.unwrap_err();
+            assert!(error.contains("تحتوي على سجلات"));
+            let patients = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM patients").fetch_one(&pool).await.map_err(|error| error.to_string())?;
+            assert_eq!(patients, 1);
+            pool.close().await;
+            Ok(())
+        }, "test activation guard timed out").unwrap();
+    }
+
+    #[test]
+    fn runtime_errors_are_logged_without_local_credentials() {
+        let fixture = RuntimeFilesFixture::new();
+        let config = super::default_config();
+        let state = DesktopState::default();
+        {
+            let mut inner = state.inner.lock().unwrap();
+            inner.paths = Some(fixture.paths.clone());
+            inner.config = Some(config.clone());
+        }
+        super::record_runtime_error(
+            &state,
+            &format!(
+                "{} {} {}",
+                config.root_password, config.app_password, config.app_key
+            ),
+        );
+        let log = fs::read_to_string(fixture.root.join("logs/runtime.log")).unwrap();
+        for secret in [&config.root_password, &config.app_password, &config.app_key] {
+            assert!(!log.contains(secret));
+        }
+        assert!(log.contains("[محجوب]"));
+    }
 
     #[test]
     fn sql_values_and_identifiers_are_escaped() {

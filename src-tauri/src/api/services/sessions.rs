@@ -7,7 +7,7 @@ use crate::api::{
         DebtRow, DoctorRow, PatientRow, PaymentRow, ServiceRow, SessionAdditionRow, SessionRow,
         SessionServiceRow, SubscriptionRow, SubscriptionUsageRow, WalletTransactionRow,
     },
-    services::ledger,
+    services::{commissions, ledger},
     time,
 };
 use chrono::NaiveDate;
@@ -483,6 +483,8 @@ pub async fn cancel(
 
     let old = session_snapshot(transaction, &current).await?;
     let was_closed = current.status == "closed";
+    let effective_current =
+        commissions::effective_session_transaction(transaction, &current).await?;
     let mut reversals = if was_closed {
         reverse_closed_effects(transaction, &current, reason, actor_id).await?
     } else {
@@ -497,8 +499,8 @@ pub async fn cancel(
                 "commission_removed".into(),
                 json!({
                     "rate": money::normalize(current.commission_rate.unwrap_or(Decimal::ZERO)),
-                    "base_amount": money::normalize(current.commission_base_amount.unwrap_or(Decimal::ZERO)),
-                    "amount": money::normalize(current.commission_amount.unwrap_or(Decimal::ZERO)),
+                    "base_amount": money::normalize(effective_current.commission_base_amount.unwrap_or(Decimal::ZERO)),
+                    "amount": money::normalize(effective_current.commission_amount.unwrap_or(Decimal::ZERO)),
                 }),
             );
     }
@@ -562,7 +564,8 @@ pub async fn correct(
     }
     let old = session_snapshot(transaction, &current).await?;
     let old_net_total = current.net_total;
-    let old_commission_amount = current.commission_amount.unwrap_or(Decimal::ZERO);
+    let old_effective = commissions::effective_session_transaction(transaction, &current).await?;
+    let old_commission_amount = old_effective.commission_amount.unwrap_or(Decimal::ZERO);
     let old_commission_rate = current.commission_rate.unwrap_or(Decimal::ZERO);
     let old_doctor_id = current.doctor_id;
 
@@ -663,6 +666,8 @@ pub async fn correct(
     };
 
     let updated = fetch_locked_session(transaction, session_id).await?;
+    let effective_updated =
+        commissions::effective_session_transaction(transaction, &updated).await?;
     impact
         .as_object_mut()
         .expect("financial impact is an object")
@@ -676,7 +681,8 @@ pub async fn correct(
         .insert(
             "commission_delta".into(),
             Value::String(money::normalize(
-                updated.commission_amount.unwrap_or(Decimal::ZERO) - old_commission_amount,
+                effective_updated.commission_amount.unwrap_or(Decimal::ZERO)
+                    - old_commission_amount,
             )),
         );
     let new = session_snapshot(transaction, &updated).await?;
@@ -703,6 +709,8 @@ pub async fn session_value(
     session: &SessionRow,
     include_wallet: bool,
 ) -> ApiResult<Value> {
+    let effective_session =
+        commissions::effective_session_transaction(transaction, session).await?;
     let patient = sqlx::query_as::<_, PatientRow>("SELECT * FROM patients WHERE id = ?")
         .bind(session.patient_id)
         .fetch_one(&mut **transaction)
@@ -753,7 +761,7 @@ pub async fn session_value(
         None => Value::Null,
     });
     Ok(resources::session_value(
-        session,
+        &effective_session,
         Some(patient),
         Some(doctor),
         Some(services),
@@ -1808,6 +1816,8 @@ async fn session_snapshot(
     transaction: &mut Transaction<'_, MySql>,
     session: &SessionRow,
 ) -> ApiResult<Value> {
+    let effective_session =
+        commissions::effective_session_transaction(transaction, session).await?;
     let services = sqlx::query_as::<_, SessionServiceRow>(
         "SELECT * FROM session_services WHERE session_id = ? ORDER BY id",
     )
@@ -1829,9 +1839,9 @@ async fn session_snapshot(
         "debt_amount": money::normalize(session.debt_amount),
         "payment_method": session.payment_method,
         "sponsor_id": session.sponsor_id,
-        "commission_rate": session.commission_rate.map(money::normalize),
-        "commission_base_amount": session.commission_base_amount.map(money::normalize),
-        "commission_amount": session.commission_amount.map(money::normalize),
+        "commission_rate": effective_session.commission_rate.map(money::normalize),
+        "commission_base_amount": effective_session.commission_base_amount.map(money::normalize),
+        "commission_amount": effective_session.commission_amount.map(money::normalize),
         "closed_at": session.closed_at.map(time::iso),
         "cancelled_at": session.cancelled_at.map(time::iso),
         "cancel_reason": session.cancel_reason,
@@ -2298,8 +2308,9 @@ mod tests {
             .await
             .expect("create and close individual session");
         let session_id = created.session["id"].as_u64().expect("session id");
+        let debt_id = created.effects.debt.as_ref().unwrap().id;
         assert_eq!(created.session["status"], "closed");
-        assert_eq!(created.session["commission_amount"], "24.000");
+        assert_eq!(created.session["commission_amount"], "15.000");
         assert_eq!(
             created.effects.payment.as_ref().unwrap().amount,
             Decimal::from(30)
@@ -2333,8 +2344,27 @@ mod tests {
         .await
         .expect("append extra units");
         assert_eq!(addition.session["net_total"], "95.000");
-        assert_eq!(addition.session["commission_amount"], "28.500");
+        assert_eq!(addition.session["commission_amount"], "19.500");
         transaction.commit().await.expect("commit addition");
+
+        let mut transaction = pool.begin().await.expect("begin debt settlement");
+        ledger::settle_debts(
+            &mut transaction,
+            Decimal::from(15),
+            "cash",
+            &[(debt_id, Decimal::from(15))],
+            receptionist_id,
+        )
+        .await
+        .expect("settle half the debt");
+        let settled_row = fetch_locked_session(&mut transaction, session_id)
+            .await
+            .expect("fetch settled session");
+        let settled = session_value(&mut transaction, &settled_row, false)
+            .await
+            .expect("load settled session");
+        assert_eq!(settled["commission_amount"], "24.000");
+        transaction.commit().await.expect("commit debt settlement");
 
         let mut transaction = pool.begin().await.expect("begin cancel");
         let cancelled = cancel(&mut transaction, session_id, "إلغاء إداري", admin_id)
